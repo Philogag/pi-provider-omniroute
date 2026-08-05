@@ -129,6 +129,12 @@ Pi 扩展可通过 `pi.registerProvider()` 注册自定义模型提供商，通�
 
 工具命名建议 `omniroute_<area>_<action>`（如 `omniroute_providers_list`），参数用 typebox 定义，统一封装 HTTP 调用与 Bearer 认证、统一错误返回。
 
+### Web 搜索/抓取工具（已实现，add-search-fetch-tools）
+
+- `omniroute_web_search`：封装 `POST /api/v1/search`，参数镜像 `v1SearchSchema`。
+- `omniroute_web_fetch`：封装 `POST /api/v1/web/fetch`，参数镜像 `v1WebFetchSchema`。
+- 认证复用 omniroute provider 凭据；支持 `timeoutMs` 参数（默认 30s）。
+
 ### Phase 3：扩展工具
 
 - memory（增删查、engine-status、summarize、reindex、qdrant 设置）

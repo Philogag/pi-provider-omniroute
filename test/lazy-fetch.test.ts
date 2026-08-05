@@ -16,6 +16,9 @@ function mockPi(): ExtensionAPI {
     registerProvider(p: Provider) {
       capturedProvider = p as Provider<"openai-completions">;
     },
+    registerTool() {
+      // 桩：扩展工厂注册工具不应影响现有 provider 测试
+    },
   } as unknown as ExtensionAPI;
 }
 
@@ -96,4 +99,9 @@ test("refreshModels 失败后保留旧列表（后续读取命中缓存）", asy
   fetchMock.mock.mockImplementation(async () => ({ ok: false, status: 500 }) as Response);
   await assert.rejects(capturedProvider!.refreshModels!(refreshCtx()), /500/);
   assert.equal(capturedProvider!.getModels().length, 1); // 旧列表保留
+});
+
+test("extension factory registers both web tools without throwing", async () => {
+  await entry(mockPi() as unknown as Parameters<typeof entry>[0]);
+  assert.ok(capturedProvider, "provider still registered");
 });

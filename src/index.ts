@@ -4,6 +4,8 @@ import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } fro
 import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
 import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
 import { resolveStoredBaseUrl } from "./auth-credentials.ts";
+import { searchTool } from "./tools/search.ts";
+import { webFetchTool } from "./tools/web-fetch.ts";
 
 type OmnirouteModel = Model<"openai-completions">;
 
@@ -54,6 +56,14 @@ export default async function (pi: ExtensionAPI) {
   };
 
   pi.registerProvider(provider);
+
+  for (const tool of [searchTool, webFetchTool]) {
+    try {
+      pi.registerTool(tool);
+    } catch (err) {
+      console.warn(`[omniroute] failed to register tool ${tool.name}:`, err);
+    }
+  }
 }
 
 
