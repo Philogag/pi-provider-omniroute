@@ -1,5 +1,6 @@
 ---
 description: 实现 OpenSpec 变更中的任务（实验性）
+argument-hint: "<用户输入>"
 ---
 
 实现 OpenSpec 变更中的任务。

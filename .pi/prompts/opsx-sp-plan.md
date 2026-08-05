@@ -1,5 +1,6 @@
 ---
 description: 实现规划细化 (SuperPower)
+argument-hint: "<用户输入>"
 ---
 
 对 Spec 需求进行更细致的计划拆解

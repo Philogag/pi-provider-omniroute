@@ -1,5 +1,6 @@
 ---
 description: 需求细化 (SuperPower)
+argument-hint: "<用户输入>"
 ---
 
 对 Spec 需求进行 Brainstorm 并细化需求

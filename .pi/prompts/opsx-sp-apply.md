@@ -1,5 +1,6 @@
 ---
 description: 实现 OpenSpec 变更中的任务 (SuperPower)
+argument-hint: "<用户输入>"
 ---
 
 使用 SuperPower 的 subagent-driven-development 技能实现 OpenSpec 变更中的任务。
