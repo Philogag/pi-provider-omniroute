@@ -10,7 +10,8 @@
     ]
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --experimental-strip-types test/",
+    "typecheck": "tsc --noEmit"
   },
   "author": "",
   "license": "ISC",
