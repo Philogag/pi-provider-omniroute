@@ -1,6 +1,8 @@
 // test/tools-search.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { searchTool } from "../src/tools/search.ts";
 import { buildSearchBody, searchParamsSchema } from "../src/tools/search.ts";
 import type { SearchToolParams } from "../src/tools/search.ts";
 import { formatSearchResults } from "../src/tools/search.ts";
@@ -91,4 +93,89 @@ test("formatSearchResults: raw JSON fallback when results missing", () => {
   const json = { weird: "shape" };
   const text = formatSearchResults(json, "q");
   assert.match(text, /weird/);
+});
+
+function fakeCtx(apiKey: string | undefined, baseUrl?: string): ExtensionContext {
+  return {
+    model: baseUrl ? ({ provider: "omniroute", baseUrl } as ExtensionContext["model"]) : undefined,
+    modelRegistry: { getApiKeyForProvider: async () => apiKey },
+  } as unknown as ExtensionContext;
+}
+
+async function runSearch(
+  params: unknown,
+  ctx: ExtensionContext,
+  fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>,
+) {
+  const original = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  if (fetchImpl) {
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return fetchImpl(String(url), init);
+    }) as typeof fetch;
+  } else {
+    globalThis.fetch = (async () => {
+      throw new Error("fetch should not be called");
+    }) as typeof fetch;
+  }
+  try {
+    const result = await searchTool.execute("call-1", params as never, undefined, undefined, ctx);
+    return { result, calls };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("searchTool: whitespace-only query -> error, no fetch", async () => {
+  const { result, calls } = await runSearch({ query: "   " }, fakeCtx("key"));
+  assert.equal(calls.length, 0);
+  const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+  assert.match(text, /query must be a non-empty/);
+});
+
+test("searchTool: missing api key -> guidance, no fetch", async () => {
+  const { result, calls } = await runSearch({ query: "pi" }, fakeCtx(undefined));
+  assert.equal(calls.length, 0);
+  const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+  assert.match(text, /\/login omniroute/);
+});
+
+test("searchTool: success formats results", async () => {
+  const { result, calls } = await runSearch(
+    { query: "pi" },
+    fakeCtx("key", "http://localhost:20128/api/v1"),
+    async () =>
+      new Response(JSON.stringify({ results: [{ title: "Pi", url: "https://pi.dev", snippet: "s" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "http://localhost:20128/api/v1/search");
+  const sentBody = JSON.parse(String(calls[0].init?.body));
+  assert.equal(sentBody.query, "pi");
+  assert.equal(sentBody.max_results, 5); // 默认值补齐
+  const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+  assert.match(text, /1\. Pi/);
+});
+
+test("searchTool: 429 propagates status", async () => {
+  const { result } = await runSearch(
+    { query: "pi" },
+    fakeCtx("key"),
+    async () => new Response(JSON.stringify({ error: "rate limited" }), { status: 429 }),
+  );
+  const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text ?? "";
+  assert.match(text, /429/);
+});
+
+test("searchTool: timeoutMs not sent in body", async () => {
+  const { calls } = await runSearch(
+    { query: "pi", timeoutMs: 60_000 },
+    fakeCtx("key"),
+    async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
+  );
+  const sentBody = JSON.parse(String(calls[0]?.init?.body));
+  assert.ok(!("timeoutMs" in sentBody));
 });

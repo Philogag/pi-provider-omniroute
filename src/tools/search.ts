@@ -1,5 +1,8 @@
 // src/tools/search.ts
 import { Type, type Static } from "@sinclair/typebox";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
 
 export const SEARCH_PROVIDERS = [
   "serper-search",
@@ -123,3 +126,57 @@ export function formatSearchResults(json: unknown, query: string): string {
   }
   return JSON.stringify(json).slice(0, SEARCH_RESULT_LIMIT);
 }
+
+export const searchTool = defineTool({
+  name: "omniroute_web_search",
+  label: "OmniRoute Web Search",
+  description:
+    "Search the web or news via OmniRoute's configured search providers (Tavily, Brave, Exa, Serper, etc.). Returns ranked results with titles and URLs. Use for current events, fact lookup, and finding sources.",
+  parameters: searchParamsSchema,
+  prepareArguments(args: unknown): { query: string } {
+    const a = args as { query?: unknown };
+    if (typeof a.query === "string") {
+      return { ...(args as Record<string, unknown>), query: a.query.trim() } as { query: string };
+    }
+    return args as { query: string };
+  },
+  async execute(
+    _toolCallId: string,
+    params: SearchToolParams,
+    signal: AbortSignal | undefined,
+    _onUpdate: unknown,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<unknown>> {
+    const query = params.query.trim();
+    if (query.length === 0) {
+      return { content: [{ type: "text", text: "query must be a non-empty string" }], details: undefined };
+    }
+    const apiKey = await resolveApiKey(ctx);
+    if (!apiKey) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.",
+          },
+        ],
+        details: undefined,
+      };
+    }
+    const baseUrl = resolveBaseUrl(ctx);
+    const timeoutMs = params.timeoutMs ?? 30_000;
+    const res = await omnirouteRequest("/search", buildSearchBody({ ...params, query }), {
+      apiKey,
+      baseUrl,
+      signal,
+      timeoutMs,
+    });
+    if (!res.ok) {
+      return {
+        content: [{ type: "text", text: res.cancelled ? "Search cancelled." : res.message }],
+        details: undefined,
+      };
+    }
+    return { content: [{ type: "text", text: formatSearchResults(res.json, query) }], details: undefined };
+  },
+});
