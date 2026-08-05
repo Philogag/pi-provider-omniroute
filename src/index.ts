@@ -1,7 +1,11 @@
-// src/index.ts — pi extension 入口
+// src/index.ts — pi extension entry
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
+import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
+import { resolveStoredBaseUrl } from "./auth-credentials.ts";
 
-const DEFAULT_BASE_URL = "http://localhost:20128/api/v1";
+type OmnirouteModel = Model<"openai-completions">;
 
 const MODEL_DEFAULTS: Omit<ProviderModelConfig, "id" | "name"> = {
   reasoning: false,
@@ -11,29 +15,54 @@ const MODEL_DEFAULTS: Omit<ProviderModelConfig, "id" | "name"> = {
   maxTokens: 4096,
 };
 
-export default async function (pi: ExtensionAPI) {
-  const apiKey = process.env.OMNIROUTE_API_KEY;
-  const baseUrl = process.env.OMNIROUTE_BASE_URL ?? DEFAULT_BASE_URL;
-
-  // 注册 provider（立即可见，models 初始为空）
-  pi.registerProvider("omniroute", {
+function toOmnirouteModel(m: { id: string }, baseUrl: string): OmnirouteModel {
+  const result: OmnirouteModel = {
+    id: m.id,
+    name: m.id,
+    api: "openai-completions" as const,
+    provider: "omniroute",
     baseUrl,
-    // 动态认证策略：env 存在用 "local" 占位（无认证），缺失则引用 env
-    apiKey: apiKey ? "local" : "$OMNIROUTE_API_KEY",
-    api: "openai-completions",
-    models: [],
-    // 支持运行时刷新：pi update --models
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 4096,
+  };
+  return result;
+}
+
+export default async function (pi: ExtensionAPI) {
+  const storedBaseUrl = resolveStoredBaseUrl();
+  const baseUrl = storedBaseUrl ?? process.env.OMNIROUTE_BASE_URL ?? OMNIROUTE_DEFAULT_BASE_URL;
+
+  let models: OmnirouteModel[] = [];
+
+  const provider: Provider<"openai-completions"> = {
+    id: "omniroute",
+    name: "OmniRoute",
+    baseUrl,
+    auth: { apiKey: omnirouteApiKeyAuth() },
+    getModels: () => models,
     async refreshModels({ signal }) {
       const res = await fetch(`${baseUrl}/models`, { signal });
       if (!res.ok) throw new Error(`OmniRoute /models failed: ${res.status}`);
-      const { data } = await res.json() as { data: Array<{ id: string }> };
-      return data.map(
-        (m): ProviderModelConfig => ({ id: m.id, name: m.id, ...MODEL_DEFAULTS }),
-      );
+      const { data } = (await res.json()) as { data: Array<{ id: string }> };
+      models = data.map((m) => toOmnirouteModel(m, baseUrl));
     },
-  });
+    stream: (
+      model: OmnirouteModel,
+      context: Context,
+      options?: StreamOptions,
+    ) => stream(model, context, options as never),
+    streamSimple: (
+      model: OmnirouteModel,
+      context: Context,
+      options?: SimpleStreamOptions,
+    ) => streamSimple(model, context, options),
+  };
 
-  // 启动时尝试拉取模型（优雅降级）
+  pi.registerProvider(provider);
+
   await tryRegisterModels(baseUrl, pi);
 }
 
@@ -44,14 +73,33 @@ async function tryRegisterModels(baseUrl: string, pi: ExtensionAPI): Promise<voi
     const res = await fetch(`${baseUrl}/models`, { signal: controller.signal });
     clearTimeout(timeout);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { data } = await res.json() as { data: Array<{ id: string }> };
-    const models: ProviderModelConfig[] = data.map(
-      (m) => ({ id: m.id, name: m.id, ...MODEL_DEFAULTS }),
-    );
-    // 用真实模型替换初始空列表
-    pi.registerProvider("omniroute", { models });
+    const { data } = (await res.json()) as { data: Array<{ id: string }> };
+    const fresh = data.map((m) => toOmnirouteModel(m, baseUrl));
+    setProviderModels(pi, fresh);
   } catch (err) {
     clearTimeout(timeout);
-    console.warn(`[omniroute] OmniRoute unavailable, skipping model registration: ${err}`);
+    console.warn(
+      `[omniroute] OmniRoute unavailable at ${baseUrl}, skipping model registration: ${err}`,
+    );
   }
+}
+
+function setProviderModels(pi: ExtensionAPI, models: OmnirouteModel[]): void {
+  pi.registerProvider({
+    id: "omniroute",
+    name: "OmniRoute",
+    baseUrl: process.env.OMNIROUTE_BASE_URL ?? OMNIROUTE_DEFAULT_BASE_URL,
+    auth: { apiKey: omnirouteApiKeyAuth() },
+    getModels: () => models,
+    stream: (
+      model: OmnirouteModel,
+      context: Context,
+      options?: StreamOptions,
+    ) => stream(model, context, options as never),
+    streamSimple: (
+      model: OmnirouteModel,
+      context: Context,
+      options?: SimpleStreamOptions,
+    ) => streamSimple(model, context, options),
+  } as unknown as Provider<"openai-completions">);
 }
