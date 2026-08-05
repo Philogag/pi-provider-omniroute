@@ -1,5 +1,8 @@
 // src/tools/web-fetch.ts
 import { Type, type Static } from "@sinclair/typebox";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
 
 export const FETCH_PROVIDERS = ["firecrawl", "jina-reader", "tavily-search", "tinyfish"] as const;
 export const FETCH_FORMATS = ["markdown", "html", "links", "screenshot"] as const;
@@ -62,3 +65,52 @@ function truncate(text: string): string {
   if (text.length <= FETCH_CONTENT_LIMIT) return text;
   return `${text.slice(0, FETCH_CONTENT_LIMIT)}\n\n[content truncated at ${FETCH_CONTENT_LIMIT} chars]`;
 }
+
+export const webFetchTool = defineTool({
+  name: "omniroute_web_fetch",
+  label: "OmniRoute Web Fetch",
+  description:
+    "Fetch and extract content from a URL via OmniRoute's configured web-fetch providers (Firecrawl, Jina Reader, Tavily Extract, TinyFish). Returns the page content as markdown by default.",
+  parameters: fetchParamsSchema,
+  async execute(
+    _toolCallId: string,
+    params: FetchToolParams,
+    signal: AbortSignal | undefined,
+    _onUpdate: unknown,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<unknown>> {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(params.url);
+    } catch {
+      return { content: [{ type: "text", text: "url must be a valid http(s) URL" }], details: undefined };
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return { content: [{ type: "text", text: "url must be an http(s) URL" }], details: undefined };
+    }
+    const apiKey = await resolveApiKey(ctx);
+    if (!apiKey) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.",
+          },
+        ],
+        details: undefined,
+      };
+    }
+    const baseUrl = resolveBaseUrl(ctx);
+    const timeoutMs = params.timeoutMs ?? 30_000;
+    const res = await omnirouteRequest("/web/fetch", buildFetchBody(params), {
+      apiKey,
+      baseUrl,
+      signal,
+      timeoutMs,
+    });
+    if (!res.ok) {
+      return { content: [{ type: "text", text: res.cancelled ? "Fetch cancelled." : res.message }], details: undefined };
+    }
+    return { content: [{ type: "text", text: extractFetchContent(res.json) }], details: undefined };
+  },
+});
