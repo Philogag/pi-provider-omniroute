@@ -1,14 +1,16 @@
 {
   "name": "pi-provider-omniroute",
   "version": "1.0.0",
-  "description": "",
+  "description": "OmniRoute OpenAI-compatible provider for Pi Agent",
+  "type": "module",
   "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@sinclair/typebox": "latest"
+  }
 }
