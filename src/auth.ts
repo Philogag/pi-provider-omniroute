@@ -77,7 +77,26 @@ export function omnirouteApiKeyAuth(): ApiKeyAuth {
         env: { OMNIROUTE_BASE_URL: baseUrl },
       };
     },
-    // resolve: see Task 6
+    resolve: async ({ ctx, credential }) => {
+      if (credential?.key) {
+        const baseUrl = credential.env?.OMNIROUTE_BASE_URL;
+        return {
+          auth: { apiKey: credential.key, ...(baseUrl ? { baseUrl } : {}) },
+          env: credential.env,
+          source: "stored credential",
+        };
+      }
+      const envKey = await ctx.env("OMNIROUTE_API_KEY");
+      const envBase = await ctx.env("OMNIROUTE_BASE_URL");
+      if (envKey) {
+        return {
+          auth: { apiKey: envKey, ...(envBase ? { baseUrl: envBase } : {}) },
+          env: envBase ? { OMNIROUTE_BASE_URL: envBase } : undefined,
+          source: "OMNIROUTE_API_KEY",
+        };
+      }
+      return undefined;
+    },
     // check: see Task 7
-  } as unknown as ApiKeyAuth;
+  };
 }

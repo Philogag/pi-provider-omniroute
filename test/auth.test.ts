@@ -72,3 +72,85 @@ test("login: propagates cancel error from interaction.prompt", async () => {
   const interaction = mockInteraction([cancelError]);
   await assert.rejects(auth.login!(interaction), /cancelled/);
 });
+
+function mockCtx(envValues: Record<string, string | undefined>) {
+  return {
+    async env(name: string): Promise<string | undefined> {
+      return envValues[name];
+    },
+    async fileExists(): Promise<boolean> {
+      return false;
+    },
+  };
+}
+
+test("resolve: stored credential with both key and baseUrl", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
+  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" } };
+  const result = await auth.resolve!({ ctx, credential });
+  assert.deepEqual(result, {
+    auth: { apiKey: "stored-key", baseUrl: "https://stored/api/v1" },
+    env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" },
+    source: "stored credential",
+  });
+});
+
+test("resolve: stored credential with key only, no env", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({});
+  const credential = { type: "api_key" as const, key: "stored-key" };
+  const result = await auth.resolve!({ ctx, credential });
+  assert.deepEqual(result, {
+    auth: { apiKey: "stored-key" },
+    env: undefined,
+    source: "stored credential",
+  });
+});
+
+test("resolve: ambient env with both key and baseUrl", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
+  const result = await auth.resolve!({ ctx, credential: undefined });
+  assert.deepEqual(result, {
+    auth: { apiKey: "env-key", baseUrl: "https://env/api/v1" },
+    env: { OMNIROUTE_BASE_URL: "https://env/api/v1" },
+    source: "OMNIROUTE_API_KEY",
+  });
+});
+
+test("resolve: ambient env with key only", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key" });
+  const result = await auth.resolve!({ ctx, credential: undefined });
+  assert.deepEqual(result, {
+    auth: { apiKey: "env-key" },
+    env: undefined,
+    source: "OMNIROUTE_API_KEY",
+  });
+});
+
+test("resolve: no credential and no env returns undefined", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({});
+  const result = await auth.resolve!({ ctx, credential: undefined });
+  assert.equal(result, undefined);
+});
+
+test("resolve: stored credential wins over ambient env", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
+  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" } };
+  const result = await auth.resolve!({ ctx, credential });
+  assert.equal((result as { auth: { apiKey: string } }).auth.apiKey, "stored-key");
+  assert.equal((result as { auth: { baseUrl?: string } }).auth.baseUrl, "https://stored/api/v1");
+});
+
+test("resolve: source field never contains the key value", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({});
+  const credential = { type: "api_key" as const, key: "supersecret", env: { OMNIROUTE_BASE_URL: "https://x/api/v1" } };
+  const result = await auth.resolve!({ ctx, credential });
+  assert.ok(result);
+  assert.ok(!JSON.stringify(result.source ?? "").includes("supersecret"));
+});
