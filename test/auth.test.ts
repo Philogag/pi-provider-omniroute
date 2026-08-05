@@ -154,3 +154,25 @@ test("resolve: source field never contains the key value", async () => {
   assert.ok(result);
   assert.ok(!JSON.stringify(result.source ?? "").includes("supersecret"));
 });
+
+test("check: returns api_key check when stored credential has key", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({});
+  const credential = { type: "api_key" as const, key: "stored-key" };
+  const result = await auth.check!({ ctx, credential });
+  assert.deepEqual(result, { type: "api_key", source: "stored credential" });
+});
+
+test("check: returns api_key check when ambient env has key", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key" });
+  const result = await auth.check!({ ctx, credential: undefined });
+  assert.deepEqual(result, { type: "api_key", source: "OMNIROUTE_API_KEY" });
+});
+
+test("check: returns undefined when no credential and no env", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({});
+  const result = await auth.check!({ ctx, credential: undefined });
+  assert.equal(result, undefined);
+});

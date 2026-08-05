@@ -97,6 +97,15 @@ export function omnirouteApiKeyAuth(): ApiKeyAuth {
       }
       return undefined;
     },
-    // check: see Task 7
+    check: async ({ ctx, credential }) => {
+      if (credential?.key) {
+        return { type: "api_key", source: "stored credential" };
+      }
+      const envKey = await ctx.env("OMNIROUTE_API_KEY");
+      if (envKey) {
+        return { type: "api_key", source: "OMNIROUTE_API_KEY" };
+      }
+      return undefined;
+    },
   };
 }
