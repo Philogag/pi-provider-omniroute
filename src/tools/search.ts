@@ -97,3 +97,29 @@ export function buildSearchBody(params: SearchToolParams): Record<string, unknow
   }
   return body;
 }
+
+const SEARCH_RESULT_LIMIT = 20_000;
+
+export function formatSearchResults(json: unknown, query: string): string {
+  if (json && typeof json === "object" && Array.isArray((json as { results?: unknown }).results)) {
+    const results = (json as { results: Array<Record<string, unknown>> }).results;
+    const blocks: string[] = [];
+    let total = 0;
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i] ?? {};
+      const lines = [`${i + 1}. ${typeof r.title === "string" && r.title ? r.title : "(untitled)"}`];
+      if (typeof r.url === "string" && r.url) lines.push(`   URL: ${r.url}`);
+      if (typeof r.snippet === "string" && r.snippet) lines.push(`   ${r.snippet}`);
+      const block = lines.join("\n");
+      if (total + block.length + 1 > SEARCH_RESULT_LIMIT && blocks.length > 0) {
+        blocks.push(`[truncated: ${results.length - blocks.length} of ${results.length} results omitted]`);
+        break;
+      }
+      blocks.push(block);
+      total += block.length + 1;
+    }
+    if (blocks.length > 0) return blocks.join("\n\n");
+    return `No results for query: ${query}`;
+  }
+  return JSON.stringify(json).slice(0, SEARCH_RESULT_LIMIT);
+}
