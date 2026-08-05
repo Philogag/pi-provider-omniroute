@@ -13,7 +13,7 @@
 
 ## 变更内容
 
-- `getModels()` 维持返回内存中的 `models` 数组；但当数组为空时返回 `undefined`（或触发一次按需拉取），让 pi 的 ModelRuntime 处理"未拉取"状态
+- `getModels()` 维持返回内存中的 `models` 数组（空数组表示未拉取），让 pi 的 ModelRuntime 处理"未拉取"状态（需要时按需调用 `refreshModels` 填充）
 - `refreshModels({ signal })` 行为保持不变：在 `pi update --models` 触发时拉取并填充缓存
 - 移除启动期 `tryRegisterModels()` 的自动调用：扩展注册 provider 时不再立即 fetch `/models`；模型拉取改为**按需**——用户切换到 omniroute 模型或显式调用 `refreshModels()` 时再拉
 - 当 `getModels()` 返回空数组时，pi 的 ModelRuntime 会按需调用 `refreshModels()`，因此"按需"语义由 pi 自身驱动，不需要扩展手动调度
