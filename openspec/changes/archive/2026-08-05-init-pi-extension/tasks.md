@@ -22,9 +22,9 @@
 ## 4. 手动验证
 
 - [x] 4.1 OmniRoute 未启动 → provider 存在、无模型、console.warn ✅
-- [ ] 4.2 OmniRoute 运行（无 API key）→ 列出 `omniroute/` 模型
-- [ ] 4.3 OmniRoute 运行（设置 API key）→ 同上，apiKey 为 "local" 占位
-- [ ] 4.4 `pi -e . update --models` → 模型列表刷新
-- [ ] 4.5 普通对话（非流式）→ 正常响应
-- [ ] 4.6 流式对话（SSE）→ 正常流式输出
-- [ ] 4.7 认证失败（错误 key）→ provider 存在、无模型、console.warn
+- [x] 4.2 OmniRoute 运行（无 API key）→ 列出 `omniroute/` 模型
+- [x] 4.3 OmniRoute 运行（设置 API key）→ 同上，apiKey 为 "local" 占位
+- [x] 4.4 `pi -e . update --models` → 模型列表刷新
+- [x] 4.5 普通对话（非流式）→ 正常响应
+- [x] 4.6 流式对话（SSE）→ 正常流式输出
+- [x] 4.7 认证失败（错误 key）→ provider 存在、无模型、console.warn
