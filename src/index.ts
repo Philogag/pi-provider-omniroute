@@ -54,26 +54,6 @@ export default async function (pi: ExtensionAPI) {
   };
 
   pi.registerProvider(provider);
-
-  await tryRegisterModels(baseUrl, (fresh) => { models = fresh; });
 }
 
-async function tryRegisterModels(
-  baseUrl: string,
-  onModels: (models: OmnirouteModel[]) => void,
-): Promise<void> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-  try {
-    const res = await fetch(`${baseUrl}/models`, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { data } = (await res.json()) as { data: Array<{ id: string }> };
-    onModels(data.map((m) => toOmnirouteModel(m, baseUrl)));
-  } catch (err) {
-    clearTimeout(timeout);
-    console.warn(
-      `[omniroute] OmniRoute unavailable at ${baseUrl}, skipping model registration: ${err}`,
-    );
-  }
-}
+
