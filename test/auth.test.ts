@@ -26,17 +26,17 @@ async function getAuth() {
 
 test("login: returns credential with key and env.OMNIROUTE_BASE_URL on success", async () => {
   const auth = await getAuth();
-  const interaction = mockInteraction(["my-key", "https://router.example.com/api/v1"]);
+  const interaction = mockInteraction(["my-key", "https://router.example.com/v1"]);
   const cred = await auth.login!(interaction);
   assert.equal(cred.type, "api_key");
   if (cred.type !== "api_key") throw new Error("narrow");
   assert.equal(cred.key, "my-key");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://router.example.com/api/v1");
+  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://router.example.com/v1");
 });
 
 test("login: prompts twice — secret for key, text for baseUrl", async () => {
   const auth = await getAuth();
-  const interaction = mockInteraction(["k", "http://localhost:20128/api/v1"]);
+  const interaction = mockInteraction(["k", "http://localhost:20128/v1"]);
   await auth.login!(interaction);
   assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls.length, 2);
   assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls[0].type, "secret");
@@ -45,10 +45,10 @@ test("login: prompts twice — secret for key, text for baseUrl", async () => {
 
 test("login: retries once on invalid baseUrl, then succeeds", async () => {
   const auth = await getAuth();
-  const interaction = mockInteraction(["k", "not-a-url", "https://ok.com/api/v1"]);
+  const interaction = mockInteraction(["k", "not-a-url", "https://ok.com/v1"]);
   const cred = await auth.login!(interaction);
   if (cred.type !== "api_key") throw new Error("narrow");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://ok.com/api/v1");
+  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://ok.com/v1");
   assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls.length, 3);
 });
 
@@ -63,7 +63,7 @@ test("login: empty baseUrl input falls back to default", async () => {
   const interaction = mockInteraction(["k", ""]);
   const cred = await auth.login!(interaction);
   if (cred.type !== "api_key") throw new Error("narrow");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "http://localhost:20128/api/v1");
+  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "http://localhost:20128/v1");
 });
 
 test("login: propagates cancel error from interaction.prompt", async () => {
@@ -86,12 +86,12 @@ function mockCtx(envValues: Record<string, string | undefined>) {
 
 test("resolve: stored credential with both key and baseUrl", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
-  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" } };
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
+  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/v1" } };
   const result = await auth.resolve!({ ctx, credential });
   assert.deepEqual(result, {
-    auth: { apiKey: "stored-key", baseUrl: "https://stored/api/v1" },
-    env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" },
+    auth: { apiKey: "stored-key", baseUrl: "https://stored/v1" },
+    env: { OMNIROUTE_BASE_URL: "https://stored/v1" },
     source: "stored credential",
   });
 });
@@ -110,11 +110,11 @@ test("resolve: stored credential with key only, no env", async () => {
 
 test("resolve: ambient env with both key and baseUrl", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
   const result = await auth.resolve!({ ctx, credential: undefined });
   assert.deepEqual(result, {
-    auth: { apiKey: "env-key", baseUrl: "https://env/api/v1" },
-    env: { OMNIROUTE_BASE_URL: "https://env/api/v1" },
+    auth: { apiKey: "env-key", baseUrl: "https://env/v1" },
+    env: { OMNIROUTE_BASE_URL: "https://env/v1" },
     source: "OMNIROUTE_API_KEY",
   });
 });
@@ -139,17 +139,17 @@ test("resolve: no credential and no env returns undefined", async () => {
 
 test("resolve: stored credential wins over ambient env", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/api/v1" });
-  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/api/v1" } };
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
+  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/v1" } };
   const result = await auth.resolve!({ ctx, credential });
   assert.equal((result as { auth: { apiKey: string } }).auth.apiKey, "stored-key");
-  assert.equal((result as { auth: { baseUrl?: string } }).auth.baseUrl, "https://stored/api/v1");
+  assert.equal((result as { auth: { baseUrl?: string } }).auth.baseUrl, "https://stored/v1");
 });
 
 test("resolve: source field never contains the key value", async () => {
   const auth = await getAuth();
   const ctx = mockCtx({});
-  const credential = { type: "api_key" as const, key: "supersecret", env: { OMNIROUTE_BASE_URL: "https://x/api/v1" } };
+  const credential = { type: "api_key" as const, key: "supersecret", env: { OMNIROUTE_BASE_URL: "https://x/v1" } };
   const result = await auth.resolve!({ ctx, credential });
   assert.ok(result);
   assert.ok(!JSON.stringify(result.source ?? "").includes("supersecret"));

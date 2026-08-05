@@ -5,7 +5,7 @@
 
 import type { ApiKeyAuth, AuthInteraction } from "@earendil-works/pi-ai";
 
-export const OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/api/v1";
+export const OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/v1";
 
 export function validateAndNormalizeBaseUrl(input: string): string {
   const trimmed = input.trim();

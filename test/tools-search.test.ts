@@ -144,7 +144,7 @@ test("searchTool: missing api key -> guidance, no fetch", async () => {
 test("searchTool: success formats results", async () => {
   const { result, calls } = await runSearch(
     { query: "pi" },
-    fakeCtx("key", "http://localhost:20128/api/v1"),
+    fakeCtx("key", "http://localhost:20128/v1"),
     async () =>
       new Response(JSON.stringify({ results: [{ title: "Pi", url: "https://pi.dev", snippet: "s" }] }), {
         status: 200,
@@ -152,7 +152,7 @@ test("searchTool: success formats results", async () => {
       }),
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "http://localhost:20128/api/v1/search");
+  assert.equal(calls[0].url, "http://localhost:20128/v1/search");
   const sentBody = JSON.parse(String(calls[0].init?.body));
   assert.equal(sentBody.query, "pi");
   assert.equal(sentBody.max_results, 5); // 默认值补齐

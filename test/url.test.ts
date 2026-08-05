@@ -12,29 +12,29 @@ test("validateAndNormalizeBaseUrl: whitespace-only returns default", () => {
 
 test("validateAndNormalizeBaseUrl: valid http URL returned trimmed", () => {
   assert.equal(
-    validateAndNormalizeBaseUrl("http://localhost:20128/api/v1"),
-    "http://localhost:20128/api/v1",
+    validateAndNormalizeBaseUrl("http://localhost:20128/v1"),
+    "http://localhost:20128/v1",
   );
 });
 
 test("validateAndNormalizeBaseUrl: valid https URL returned as-is", () => {
   assert.equal(
-    validateAndNormalizeBaseUrl("https://router.example.com/api/v1"),
-    "https://router.example.com/api/v1",
+    validateAndNormalizeBaseUrl("https://router.example.com/v1"),
+    "https://router.example.com/v1",
   );
 });
 
 test("validateAndNormalizeBaseUrl: trailing slash preserved", () => {
   assert.equal(
-    validateAndNormalizeBaseUrl("https://router.example.com/api/v1/"),
-    "https://router.example.com/api/v1/",
+    validateAndNormalizeBaseUrl("https://router.example.com/v1/"),
+    "https://router.example.com/v1/",
   );
 });
 
 test("validateAndNormalizeBaseUrl: surrounding whitespace trimmed", () => {
   assert.equal(
-    validateAndNormalizeBaseUrl("  https://router.example.com/api/v1  "),
-    "https://router.example.com/api/v1",
+    validateAndNormalizeBaseUrl("  https://router.example.com/v1  "),
+    "https://router.example.com/v1",
   );
 });
 
@@ -59,6 +59,6 @@ test("validateAndNormalizeBaseUrl: rejects missing hostname", () => {
   );
 });
 
-test("OMNIROUTE_DEFAULT_BASE_URL is http://localhost:20128/api/v1", () => {
-  assert.equal(OMNIROUTE_DEFAULT_BASE_URL, "http://localhost:20128/api/v1");
+test("OMNIROUTE_DEFAULT_BASE_URL is http://localhost:20128/v1", () => {
+  assert.equal(OMNIROUTE_DEFAULT_BASE_URL, "http://localhost:20128/v1");
 });

@@ -128,7 +128,7 @@ test("webFetchTool: missing api key -> guidance, no fetch", async () => {
 test("webFetchTool: success returns extracted content", async () => {
   const { result, calls } = await runFetch(
     { url: "https://example.com" },
-    fakeCtx("key", "http://localhost:20128/api/v1"),
+    fakeCtx("key", "http://localhost:20128/v1"),
     async () =>
       new Response(JSON.stringify({ markdown: "# Hello" }), {
         status: 200,
@@ -136,7 +136,7 @@ test("webFetchTool: success returns extracted content", async () => {
       }),
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "http://localhost:20128/api/v1/web/fetch");
+  assert.equal(calls[0].url, "http://localhost:20128/v1/web/fetch");
   const sentBody = JSON.parse(String(calls[0].init?.body));
   assert.equal(sentBody.format, "markdown"); // 默认值补齐
   assert.equal(sentBody.depth, 0);

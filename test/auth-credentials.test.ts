@@ -37,17 +37,17 @@ test("readCredential: returns undefined when no omniroute key", async () => {
 });
 
 test("readCredential: returns omniroute entry with env", async () => {
-  const cred = { type: "api_key", key: "abc", env: { OMNIROUTE_BASE_URL: "https://x/api/v1" } };
+  const cred = { type: "api_key", key: "abc", env: { OMNIROUTE_BASE_URL: "https://x/v1" } };
   writeFileSync(join(tmpDir!, "auth.json"), JSON.stringify({ omniroute: cred }));
   const { readCredential } = await import("../src/auth-credentials.ts");
   assert.deepEqual(readCredential(), cred);
 });
 
 test("resolveStoredBaseUrl: returns baseUrl from credential env", async () => {
-  const cred = { type: "api_key", key: "abc", env: { OMNIROUTE_BASE_URL: "https://x/api/v1" } };
+  const cred = { type: "api_key", key: "abc", env: { OMNIROUTE_BASE_URL: "https://x/v1" } };
   writeFileSync(join(tmpDir!, "auth.json"), JSON.stringify({ omniroute: cred }));
   const { resolveStoredBaseUrl } = await import("../src/auth-credentials.ts");
-  assert.equal(resolveStoredBaseUrl(), "https://x/api/v1");
+  assert.equal(resolveStoredBaseUrl(), "https://x/v1");
 });
 
 test("resolveStoredBaseUrl: returns undefined when env missing", async () => {

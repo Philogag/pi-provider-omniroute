@@ -13,16 +13,16 @@ function ctxWith(model: ExtensionContext["model"], apiKey?: string): ExtensionCo
 }
 
 test("resolveBaseUrl: prefers current omniroute model baseUrl", () => {
-  const ctx = ctxWith({ provider: "omniroute", baseUrl: "http://remote:9000/api/v1" } as ExtensionContext["model"]);
-  assert.equal(resolveBaseUrl(ctx), "http://remote:9000/api/v1");
+  const ctx = ctxWith({ provider: "omniroute", baseUrl: "http://remote:9000/v1" } as ExtensionContext["model"]);
+  assert.equal(resolveBaseUrl(ctx), "http://remote:9000/v1");
 });
 
 test("resolveBaseUrl: ignores non-omniroute model, falls back to env", () => {
   const before = process.env.OMNIROUTE_BASE_URL;
-  process.env.OMNIROUTE_BASE_URL = "http://env-host/api/v1";
+  process.env.OMNIROUTE_BASE_URL = "http://env-host/v1";
   try {
-    const ctx = ctxWith({ provider: "anthropic", baseUrl: "http://other/api/v1" } as ExtensionContext["model"]);
-    assert.equal(resolveBaseUrl(ctx), "http://env-host/api/v1");
+    const ctx = ctxWith({ provider: "anthropic", baseUrl: "http://other/v1" } as ExtensionContext["model"]);
+    assert.equal(resolveBaseUrl(ctx), "http://env-host/v1");
   } finally {
     if (before === undefined) delete process.env.OMNIROUTE_BASE_URL;
     else process.env.OMNIROUTE_BASE_URL = before;
@@ -94,7 +94,7 @@ function installFetch(impl: (url: string, init?: RequestInit) => Promise<Respons
   };
 }
 
-const OPTS = { apiKey: "test-key", baseUrl: "http://localhost:20128/api/v1", timeoutMs: 30_000 };
+const OPTS = { apiKey: "test-key", baseUrl: "http://localhost:20128/v1", timeoutMs: 30_000 };
 
 test("omnirouteRequest: sends POST with Bearer + JSON headers, joins baseUrl/path", async (t) => {
   const { calls, restore } = installFetch(async () => jsonResponse(200, { ok: true }));
@@ -102,7 +102,7 @@ test("omnirouteRequest: sends POST with Bearer + JSON headers, joins baseUrl/pat
   const res = await omnirouteRequest("/search", { query: "pi" }, OPTS);
   assert.ok(res.ok);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "http://localhost:20128/api/v1/search");
+  assert.equal(calls[0].url, "http://localhost:20128/v1/search");
   assert.equal(calls[0].init?.method, "POST");
   const headers = calls[0].init?.headers as Record<string, string>;
   assert.equal(headers.Authorization, "Bearer test-key");
@@ -113,8 +113,8 @@ test("omnirouteRequest: sends POST with Bearer + JSON headers, joins baseUrl/pat
 test("omnirouteRequest: strips trailing slash from baseUrl", async (t) => {
   const { calls, restore } = installFetch(async () => jsonResponse(200, {}));
   t.after(restore);
-  await omnirouteRequest("/search", {}, { ...OPTS, baseUrl: "http://x/api/v1/" });
-  assert.equal(calls[0].url, "http://x/api/v1/search");
+  await omnirouteRequest("/search", {}, { ...OPTS, baseUrl: "http://x/v1/" });
+  assert.equal(calls[0].url, "http://x/v1/search");
 });
 
 test("omnirouteRequest: parses 2xx JSON into json field", async (t) => {
@@ -143,7 +143,7 @@ test("omnirouteRequest: network failure -> cannot reach message", async (t) => {
   const res = (await omnirouteRequest("/search", {}, OPTS)) as Extract<OmnirouteResult, { ok: false }>;
   assert.equal(res.ok, false);
   assert.equal(res.status, 0);
-  assert.match(res.message, /Cannot reach OmniRoute at http:\/\/localhost:20128\/api\/v1/);
+  assert.match(res.message, /Cannot reach OmniRoute at http:\/\/localhost:20128\/v1/);
 });
 
 test("omnirouteRequest: timeout produces timed-out message (not cancelled)", async (t) => {
