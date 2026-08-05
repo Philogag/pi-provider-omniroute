@@ -3,7 +3,7 @@
  * Used at /login time (with retry) and conceptually reusable at startup.
  */
 
-import type { ApiKeyAuth, AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
+import type { ApiKeyAuth, AuthInteraction } from "@earendil-works/pi-ai";
 
 export const OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/api/v1";
 

@@ -62,7 +62,7 @@
 ## 8. Final verification
 
 - [x] 8.1 `npm test` and `npm run typecheck` both succeed
-- [x] 8.2 `git log --oneline` shows 7 clean commits
+- [x] 8.2 `git log --oneline` shows 9 clean commits
 - [x] 8.3 No `pi.registerProvider("omniroute", {` legacy form remains in `src/`
 - [x] 8.4 No `OMNIROUTE_DASHBOARD_PASSWORD` / `OMNIROUTE_AUTH_TOKEN` / `OMNIROUTE_REQUIRE_LOGIN` references in `src/`
 - [x] 8.5 Update `openspec/changes/support-custom-baseurl-on-login/tasks.md` (Task 9) to mirror this plan
