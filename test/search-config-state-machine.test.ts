@@ -67,3 +67,54 @@ test("createMenuStateMachine: getComponent in top mode returns a Component", () 
   assert.ok(Array.isArray(out));
   assert.ok(out.length > 0);
 });
+
+test("createMenuStateMachine: submenu component instance is cached across renders and recreated after reset", async () => {
+  globalThis.fetch = mock.method(globalThis, "fetch", async () => jsonResponse(200, {
+    data: [{ id: "tavily-search", name: "Tavily", search_types: ["web"] }],
+  })) as never;
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  // Activate via the top-level component's Enter handler (the production path).
+  const top = sm.getComponent(tui, fakeTheme) as unknown as { handleInput: (d: string) => void };
+  top.handleInput("\r");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.notEqual(sm.catalog(), undefined, "catalog must load after activation");
+
+  // Same instance across repeated getComponent calls proves the SettingsList
+  // (and its selectedIndex cursor) survives re-renders; a fresh instance would
+  // reset the cursor to row 0 on every frame and make the submenu unusable.
+  const first = sm.getComponent(tui, fakeTheme);
+  const second = sm.getComponent(tui, fakeTheme);
+  assert.equal(first, second, "submenu must be the same cached instance across renders");
+
+  // Commit resets to top; re-activation must build a fresh submenu instance.
+  sm.onCommit("tavily-search");
+  assert.equal(sm.mode(), "top");
+  const top2 = sm.getComponent(tui, fakeTheme) as unknown as { handleInput: (d: string) => void };
+  top2.handleInput("\r");
+  await new Promise((r) => setTimeout(r, 10));
+  const third = sm.getComponent(tui, fakeTheme);
+  assert.notEqual(third, first, "submenu must be recreated after commit + re-activation");
+});
+
+test("createMenuStateMachine: requestRender is called after the catalog fetch resolves", async () => {
+  let releaseFetch: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { releaseFetch = resolve; });
+  globalThis.fetch = mock.method(globalThis, "fetch", async () => {
+    await gate;
+    return jsonResponse(200, { data: [{ id: "tavily-search", name: "Tavily", search_types: ["web"] }] });
+  }) as never;
+  let renders = 0;
+  const tui = { requestRender: () => { renders++; } } as unknown as TUI;
+  const sm = createMenuStateMachine(makeDeps());
+  const top = sm.getComponent(tui, fakeTheme) as unknown as { handleInput: (d: string) => void };
+  top.handleInput("\r");
+  const rendersAfterActivate = renders;
+  assert.ok(rendersAfterActivate >= 1, "activation must request a render synchronously");
+  // The fetch is still gated: the Loading component is on screen, no catalog yet.
+  assert.equal(sm.catalog(), undefined, "catalog must not be set before the fetch resolves");
+  releaseFetch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.notEqual(sm.catalog(), undefined, "catalog must load once the fetch resolves");
+  assert.ok(renders > rendersAfterActivate, "requestRender must fire after the catalog fetch resolves");
+});

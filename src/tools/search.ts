@@ -14,6 +14,9 @@ export function setSearchConfigReader(fn: () => string | undefined): void {
 }
 
 function isValidProvider(p: string | undefined): p is string {
+  // Per spec G4: unknown / non-static providers are dropped defensively to
+  // avoid 4xx propagation to OmniRoute. Do NOT loosen this gate without
+  // updating the spec (G4 mandates omission for non-canonical provider ids).
   return typeof p === "string" && (STATIC_FALLBACK_PROVIDERS as readonly string[]).includes(p) && p !== "auto";
 }
 

@@ -387,8 +387,14 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   let currentProvider = deps.initialCurrentProvider;
   let catalogValue: SearchCatalog | undefined = undefined;
   let pendingFetch: AbortController | undefined;
+  // Memoized submenu component (design §9.3): the SettingsList inside
+  // renderProviderSubmenu keeps its cursor (selectedIndex) in instance state,
+  // so we must return the SAME instance across renders/inputs while in sub
+  // mode, or the cursor resets to row 0 on every frame and the submenu becomes
+  // keyboard-unusable. Invalidated on every top<->sub transition and reset.
+  let cachedSubmenu: Component | undefined = undefined;
 
-  const fetchCatalogAsync = async (): Promise<void> => {
+  const fetchCatalogAsync = async (tui: TUI): Promise<void> => {
     const controller = new AbortController();
     pendingFetch = controller;
     const apiKey = await deps.resolveApiKey();
@@ -404,6 +410,8 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       // a reset path may have aborted the in-flight request; both make this stale.
       if (pendingFetch !== controller || mode !== "sub") return;
       catalogValue = c;
+      // The Loading component stays on screen until the TUI is told to repaint.
+      tui.requestRender();
     } catch {
       // Already handled by resolveSearchCatalog; nothing to do.
     }
@@ -415,9 +423,11 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
     onActivateSearchProvider: () => {
       mode = "sub";
       catalogValue = undefined;
+      cachedSubmenu = undefined;
       // Caller must call fetchCatalogAsync separately (to pass ctx); see command wiring in Task 9.
     },
     onCommit: (provider) => {
+      cachedSubmenu = undefined;
       pendingFetch?.abort();
       currentProvider = provider;
       deps.onCommitPersist(provider);
@@ -425,11 +435,13 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       catalogValue = undefined;
     },
     onCancel: () => {
+      cachedSubmenu = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
     },
     onEsc: () => {
+      cachedSubmenu = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
@@ -442,10 +454,12 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           theme,
           onActivateSearchProvider: () => {
             mode = "sub";
+            // A fresh submenu (and catalog) is needed for the new sub session.
+            cachedSubmenu = undefined;
             tui.requestRender();
             // Resolvers are bound closures (injecting the command ctx), so the
             // fetch already has everything it needs.
-            void fetchCatalogAsync();
+            void fetchCatalogAsync(tui);
           },
         });
       }
@@ -455,16 +469,23 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           render: () => ["Loading search providers…"],
           invalidate: () => {},
           handleInput: (data: string) => {
-            if (data === "\x1b") { pendingFetch?.abort(); mode = "top"; tui.requestRender(); }
+            if (data === "\x1b") {
+              cachedSubmenu = undefined;
+              pendingFetch?.abort();
+              mode = "top";
+              tui.requestRender();
+            }
           },
         };
         return loading;
       }
-      return renderProviderSubmenu({
+      if (cachedSubmenu) return cachedSubmenu;
+      cachedSubmenu = renderProviderSubmenu({
         currentProvider,
         catalog: catalogValue,
         theme,
         onCommit: (p) => {
+          cachedSubmenu = undefined;
           pendingFetch?.abort();
           currentProvider = p;
           deps.onCommitPersist(p);
@@ -473,12 +494,14 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           tui.requestRender();
         },
         onCancel: () => {
+          cachedSubmenu = undefined;
           pendingFetch?.abort();
           mode = "top";
           catalogValue = undefined;
           tui.requestRender();
         },
       });
+      return cachedSubmenu;
     },
   } as MenuStateMachine;
 }
