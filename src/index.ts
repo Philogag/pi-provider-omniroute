@@ -39,11 +39,11 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
     api: "openai-completions" as const,
     provider: "omniroute",
     baseUrl,
-    reasoning: false,
+    reasoning: m.capabilities?.reasoning === true,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: pickInt(m.max_input_tokens, m.context_length) ?? 128000,
-    maxTokens: 4096,
+    maxTokens: pickInt(m.max_output_tokens) ?? 4096,
   };
   return result;
 }

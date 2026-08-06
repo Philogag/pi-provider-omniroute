@@ -78,3 +78,30 @@ test("contextWindow: 非法值按缺失处理（0 / 负数 / 字符串）", asyn
   ]);
   assert.equal(m.contextWindow, 128000);
 });
+
+test("maxTokens: 存在 max_output_tokens 时使用该值", async () => {
+  const [m] = await refreshOnce([{ id: "m1", max_output_tokens: 65536 }]);
+  assert.equal(m.maxTokens, 65536);
+});
+
+test("maxTokens: 缺失时回退 4096", async () => {
+  const [m] = await refreshOnce([{ id: "m2" }]);
+  assert.equal(m.maxTokens, 4096);
+});
+
+test("reasoning: capabilities.reasoning 为 true 时启用", async () => {
+  const [m] = await refreshOnce([{ id: "m1", capabilities: { reasoning: true } }]);
+  assert.equal(m.reasoning, true);
+});
+
+test("reasoning: 键缺失时禁用", async () => {
+  const [m] = await refreshOnce([
+    { id: "m2", capabilities: { tool_calling: true } },
+  ]);
+  assert.equal(m.reasoning, false);
+});
+
+test("reasoning: capabilities 整体缺失时禁用", async () => {
+  const [m] = await refreshOnce([{ id: "m3" }]);
+  assert.equal(m.reasoning, false);
+});
