@@ -32,6 +32,15 @@ function pickInt(...vs: Array<number | undefined>): number | undefined {
   return undefined;
 }
 
+const THINKING_LEVEL_MAP = {
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+  max: "high",
+} as const;
+
 function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteModel {
   const result: OmnirouteModel = {
     id: m.id,
@@ -40,6 +49,8 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
     provider: "omniroute",
     baseUrl,
     reasoning: m.capabilities?.reasoning === true,
+    thinkingLevelMap:
+      m.capabilities?.thinking === true ? THINKING_LEVEL_MAP : undefined,
     input:
       m.capabilities?.vision === true || m.input_modalities?.includes("image")
         ? ["text", "image"]

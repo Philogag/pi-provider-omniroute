@@ -137,3 +137,27 @@ test("name: 非字符串时回退 id", async () => {
   const [m] = await refreshOnce([{ id: "m6", name: 42 }]);
   assert.equal(m.name, "m6");
 });
+
+test("thinkingLevelMap: capabilities.thinking 为 true 时设置完整映射", async () => {
+  const [m] = await refreshOnce([{ id: "m1", capabilities: { thinking: true } }]);
+  assert.deepEqual(m.thinkingLevelMap, {
+    minimal: "minimal",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "high",
+    max: "high",
+  });
+});
+
+test("thinkingLevelMap: thinking 缺失时不设置", async () => {
+  const [m] = await refreshOnce([
+    { id: "m2", capabilities: { tool_calling: true } },
+  ]);
+  assert.equal(m.thinkingLevelMap, undefined);
+});
+
+test("thinkingLevelMap: capabilities 整体缺失时不设置", async () => {
+  const [m] = await refreshOnce([{ id: "m3" }]);
+  assert.equal(m.thinkingLevelMap, undefined);
+});
