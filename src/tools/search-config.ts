@@ -227,6 +227,56 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
   return container as unknown as Component;
 }
 
+// --- Top-level menu ---
+
+export interface TopLevelMenuParams {
+  readonly currentProvider: string | undefined;
+  readonly theme: ReturnType<typeof getSettingsListTheme>;
+  readonly onActivateSearchProvider: () => void;
+}
+
+function previewForProvider(p: string | undefined): string {
+  if (p === undefined || p === "auto") return "Auto";
+  return p;
+}
+
+export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
+  const { currentProvider, theme: _theme, onActivateSearchProvider } = params;
+  const preview = previewForProvider(currentProvider);
+
+  const row: Component = {
+    render: (_w: number) => [`  ▶ Search provider: ${preview}`],
+    invalidate: () => {},
+    handleInput: (data: string) => {
+      if (data === "\r" || data === "\n") {
+        onActivateSearchProvider();
+      }
+    },
+  };
+  const hint: Component = {
+    render: (_w: number) => ["", "  ↑/↓ or j/k: navigate · Enter: activate · Esc: close"],
+    invalidate: () => {},
+    handleInput: () => {},
+  };
+  const header: Component = {
+    render: (_w: number) => ["OmniRoute Settings", ""],
+    invalidate: () => {},
+    handleInput: () => {},
+  };
+  const container = new Container();
+  container.addChild(header);
+  container.addChild(row);
+  container.addChild(hint);
+
+  // A bare Container does not forward input; route keypresses (e.g. Enter) to the
+  // children so the row's handleInput fires when rendered inside a TUI/Overlay.
+  (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+    for (const child of container.children) child.handleInput?.(data);
+  };
+
+  return container as unknown as Component;
+}
+
 // --- omniroute.json persistence ---
 
 export function resolveOmnirouteConfigPath(): string {
