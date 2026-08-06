@@ -164,14 +164,16 @@ function buildProviderItems(params: ProviderSubmenuParams): readonly ProviderIte
     id: AUTO_ID,
     label: AUTO_LABEL,
     currentValue: isCurrentAuto ? AUTO_ID : (currentProvider ?? "auto"),
-    values: STATIC_FALLBACK_PROVIDERS.includes(currentProvider ?? "")
-      ? [currentProvider as string, AUTO_ID]
-      : [AUTO_ID],
+    // Invariant: currentValue must be a member of values, else SettingsList.activateItem
+    // (indexOf => -1) coerces the row to values[0] on the first Enter. When a concrete
+    // provider is active (static or catalog-only), keep it in the auto row's values so
+    // the row shows its actual current selection instead of snapping to AUTO_ID.
+    values: isCurrentAuto ? [AUTO_ID] : [currentProvider as string, AUTO_ID],
   };
   const providerItems: ProviderItem[] = catalog.providers.map((p) => ({
     id: p.id,
     label: p.name || p.id,
-    currentValue: p.id === currentProvider ? p.id : (isCurrentAuto ? AUTO_ID : (currentProvider ?? AUTO_ID)),
+    currentValue: p.id === currentProvider ? p.id : AUTO_ID,
     values: [AUTO_ID, p.id],
   }));
   return [autoItem, ...providerItems];

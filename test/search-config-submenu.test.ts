@@ -68,6 +68,52 @@ test("renderProviderSubmenu: onCancel is invoked on Esc", () => {
   assert.deepEqual(calls, [["cancel"]]);
 });
 
+test("renderProviderSubmenu: every row keeps currentValue within its values (SettingsList invariant)", () => {
+  // Uses a catalog-only concrete provider (not in STATIC_FALLBACK_PROVIDERS) plus a second
+  // provider. Both prior bugs surface here:
+  //   - non-current provider rows must show AUTO_ID, not the active currentProvider (which
+  //     would be absent from their values array and coerce to "auto" on first Enter);
+  //   - the auto row must keep the active provider in its values array.
+  const params: ProviderSubmenuParams = {
+    currentProvider: "exa-search-from-catalog",
+    catalog: makeCatalog([
+      ["exa-search-from-catalog", "Exa (catalog)"],
+      ["brave-search", "Brave"],
+    ]),
+    theme: fakeTheme,
+    onCommit: () => {},
+    onCancel: () => {},
+  };
+  const container = renderProviderSubmenu(params) as unknown as {
+    children: Array<{ items: Array<{ id: string; currentValue: string; values: readonly string[] }> }>;
+  };
+  const rows = container.children[0].items;
+  assert.ok(rows.length >= 3, "expected auto + 2 provider rows");
+
+  // Every row must satisfy currentValue ∈ values, otherwise SettingsList.activateItem
+  // (item.values.indexOf(item.currentValue) === -1) coerces it to values[0] on first Enter.
+  for (const row of rows) {
+    assert.ok(
+      row.values.includes(row.currentValue),
+      `row ${row.id}: currentValue ${JSON.stringify(row.currentValue)} not in values [${row.values.join(", ")}]`,
+    );
+  }
+
+  // A non-current provider row must show AUTO_ID (inactive), not the active provider.
+  const braveRow = rows.find((r) => r.id === "brave-search")!;
+  assert.equal(braveRow.currentValue, "auto");
+  assert.ok(braveRow.values.includes("brave-search"));
+
+  // The auto row must keep the active (catalog-only) provider in its values.
+  const autoRow = rows.find((r) => r.id === "auto")!;
+  assert.equal(autoRow.currentValue, "exa-search-from-catalog");
+  assert.ok(autoRow.values.includes("exa-search-from-catalog"));
+
+  // The active provider row keeps its own id as currentValue.
+  const activeRow = rows.find((r) => r.id === "exa-search-from-catalog")!;
+  assert.equal(activeRow.currentValue, "exa-search-from-catalog");
+});
+
 test("renderProviderSubmenu: isFallback shows hint in render output", () => {
   const params: ProviderSubmenuParams = {
     currentProvider: undefined,
