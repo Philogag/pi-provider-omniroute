@@ -14,6 +14,7 @@
 - [x] 1.7 编写 name 映射测试：`name: "GPT-4o"` → `name === "GPT-4o"`；`name` 缺失或非字符串 → 回退 `id`
 - [x] 1.8 编写 thinkingLevelMap 映射测试：`capabilities.thinking: true` → `thinkingLevelMap` 深等于 `{ minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" }`；`thinking` 缺失或非 true → `undefined`
 - [x] 1.9 确认 `test/lazy-fetch.test.ts` 现有断言（`{ id }` 条目 + 默认值回退）无需修改仍全部通过
+- [x] 1.10 编写 input_modalities 非数组（如字符串 `"text,image"`）回退测试：`input` 为 `["text"]`（spec 边界场景补录）
 
 ## 2. 实现映射（src/index.ts）
 

@@ -52,7 +52,8 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
     thinkingLevelMap:
       m.capabilities?.thinking === true ? THINKING_LEVEL_MAP : undefined,
     input:
-      m.capabilities?.vision === true || m.input_modalities?.includes("image")
+      m.capabilities?.vision === true ||
+      (Array.isArray(m.input_modalities) && m.input_modalities.includes("image"))
         ? ["text", "image"]
         : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

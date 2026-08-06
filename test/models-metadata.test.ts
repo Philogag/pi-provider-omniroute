@@ -161,3 +161,13 @@ test("thinkingLevelMap: capabilities 整体缺失时不设置", async () => {
   const [m] = await refreshOnce([{ id: "m3" }]);
   assert.equal(m.thinkingLevelMap, undefined);
 });
+
+test("input: input_modalities 非数组时按无视觉证据处理", async () => {
+  const [m] = await refreshOnce([{ id: "m9", input_modalities: "text,image" }]);
+  assert.deepEqual(m.input, ["text"]);
+});
+
+test("contextWindow: 字符串 max_input_tokens 按缺失处理", async () => {
+  const [m] = await refreshOnce([{ id: "m5", max_input_tokens: "100" }]);
+  assert.equal(m.contextWindow, 128000);
+});
