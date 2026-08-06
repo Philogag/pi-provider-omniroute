@@ -1,6 +1,9 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
+import { Container, SettingsList, type Component } from "@earendil-works/pi-tui";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
   "brave-search",
@@ -132,4 +135,89 @@ export async function resolveSearchCatalog(
     }
     return { providers: staticFallback(), isFallback: true };
   }
+}
+
+// --- Provider submenu ---
+
+export interface ProviderSubmenuParams {
+  readonly currentProvider: string | undefined;
+  readonly catalog: SearchCatalog;
+  readonly theme: ReturnType<typeof getSettingsListTheme>;
+  readonly onCommit: (provider: string | undefined) => void;
+  readonly onCancel: () => void;
+}
+
+const AUTO_ID = "auto";
+const AUTO_LABEL = "Auto (follow server default)";
+
+interface ProviderItem {
+  readonly id: string;
+  readonly label: string;
+  readonly currentValue: string;
+  readonly values: readonly string[];
+}
+
+function buildProviderItems(params: ProviderSubmenuParams): readonly ProviderItem[] {
+  const { currentProvider, catalog } = params;
+  const isCurrentAuto = currentProvider === undefined || currentProvider === "auto";
+  const autoItem: ProviderItem = {
+    id: AUTO_ID,
+    label: AUTO_LABEL,
+    currentValue: isCurrentAuto ? AUTO_ID : (currentProvider ?? "auto"),
+    values: STATIC_FALLBACK_PROVIDERS.includes(currentProvider ?? "")
+      ? [currentProvider as string, AUTO_ID]
+      : [AUTO_ID],
+  };
+  const providerItems: ProviderItem[] = catalog.providers.map((p) => ({
+    id: p.id,
+    label: p.name || p.id,
+    currentValue: p.id === currentProvider ? p.id : (isCurrentAuto ? AUTO_ID : (currentProvider ?? AUTO_ID)),
+    values: [AUTO_ID, p.id],
+  }));
+  return [autoItem, ...providerItems];
+}
+
+export function renderProviderSubmenu(params: ProviderSubmenuParams): Component {
+  const items = buildProviderItems(params);
+  const settingsTheme = params.theme;
+  let sl: SettingsList;
+
+  const onValueChange = (id: string, newValue: string): void => {
+    if (newValue === AUTO_ID || id === AUTO_ID) {
+      params.onCommit(undefined);
+    } else {
+      params.onCommit(newValue);
+    }
+  };
+
+  sl = new SettingsList(
+    items as never,
+    Math.min(items.length, 15),
+    settingsTheme,
+    onValueChange,
+    params.onCancel,  // settings list treats this as "cancel/close" callback
+  );
+
+  const container = new Container();
+  if (params.catalog.isFallback) {
+    // The hint is rendered above the SettingsList; we use a small component for the hint row.
+    const hint: Component = {
+      render: (_w: number) => ["OmniRoute search catalog unreachable, using built-in list", ""],
+      invalidate: () => {},
+      handleInput: () => {},
+    };
+    container.addChild(hint);
+  }
+  container.addChild(sl as unknown as Component);
+
+  // A bare Container does not forward input; route keypresses (e.g. Esc) to the
+  // SettingsList so its onCancel fires when rendered inside a TUI/Overlay.
+  (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+    for (const child of container.children) child.handleInput?.(data);
+  };
+
+  // Expose the SettingsList's onChange for unit tests (see test/search-config-submenu.test.ts).
+  (container as unknown as { _sl: { onChange: typeof onValueChange } })._sl = { onChange: onValueChange };
+
+  return container as unknown as Component;
 }
