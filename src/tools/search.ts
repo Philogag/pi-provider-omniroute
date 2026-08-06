@@ -5,6 +5,18 @@ import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-codin
 import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
 
 import { STATIC_FALLBACK_PROVIDERS } from "./search-config.ts";
+
+// --- Search provider config reader (injected by src/index.ts) ---
+let getConfigProvider: () => string | undefined = () => undefined;
+
+export function setSearchConfigReader(fn: () => string | undefined): void {
+  getConfigProvider = fn;
+}
+
+function isValidProvider(p: string | undefined): p is string {
+  return typeof p === "string" && (STATIC_FALLBACK_PROVIDERS as readonly string[]).includes(p) && p !== "auto";
+}
+
 export const SEARCH_PROVIDERS = STATIC_FALLBACK_PROVIDERS;
 export const SEARCH_TYPES = ["web", "news"] as const;
 export const TIME_RANGES = ["any", "hour", "day", "week", "month", "year"] as const;
@@ -137,6 +149,13 @@ export const searchTool = defineTool({
     if (query.length === 0) {
       return { content: [{ type: "text", text: "query must be a non-empty string" }], details: undefined };
     }
+    const configProvider = getConfigProvider();
+    const effectiveProvider =
+      params.provider !== undefined
+        ? params.provider
+        : isValidProvider(configProvider)
+        ? configProvider
+        : undefined;
     const apiKey = await resolveApiKey(ctx);
     if (!apiKey) {
       return {
@@ -151,7 +170,7 @@ export const searchTool = defineTool({
     }
     const baseUrl = resolveBaseUrl(ctx);
     const timeoutMs = params.timeoutMs ?? 30_000;
-    const res = await omnirouteRequest("/search", buildSearchBody({ ...params, query }), {
+    const res = await omnirouteRequest("/search", buildSearchBody({ ...params, query, provider: effectiveProvider }), {
       apiKey,
       baseUrl,
       signal,
