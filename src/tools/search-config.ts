@@ -3,6 +3,9 @@
 
 import { Container, SettingsList, type Component } from "@earendil-works/pi-tui";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -222,4 +225,75 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
   (container as unknown as { _sl: { onChange: typeof onValueChange } })._sl = { onChange: onValueChange };
 
   return container as unknown as Component;
+}
+
+// --- omniroute.json persistence ---
+
+export function resolveOmnirouteConfigPath(): string {
+  const fromEnv = process.env.PI_AGENT_DIR;
+  const base = fromEnv || join(homedir(), ".pi", "agent");
+  return join(base, "omniroute.json");
+}
+
+export function readOmnirouteConfig(): { readonly provider?: string } {
+  const path = resolveOmnirouteConfigPath();
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    console.warn(`[omniroute] failed to read ${path}: ${(err as Error).message}`);
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn(`[omniroute] ${path} is malformed JSON: ${(err as Error).message}`);
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const root = parsed as Record<string, unknown>;
+  const search = root["search"];
+  if (!search || typeof search !== "object" || Array.isArray(search)) return {};
+  const provider = (search as Record<string, unknown>)["provider"];
+  if (typeof provider !== "string") return {};
+  return { provider };
+}
+
+export function writeOmnirouteConfig(provider: string | undefined): void {
+  const path = resolveOmnirouteConfigPath();
+  const tmp = path + ".tmp";
+  // Read current (preserve unknown keys)
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      root = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[omniroute] failed to read ${path} before write: ${(err as Error).message}`);
+    }
+    // ENOENT or malformed: start from `{}`. Continue with write.
+  }
+
+  if (provider === undefined) {
+    delete root["search"];
+  } else {
+    if (!root["search"] || typeof root["search"] !== "object" || Array.isArray(root["search"])) {
+      root["search"] = {};
+    }
+    (root["search"] as Record<string, unknown>)["provider"] = provider;
+  }
+
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(root, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+  }
 }
