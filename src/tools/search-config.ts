@@ -252,12 +252,21 @@ export function readOmnirouteConfig(): { readonly provider?: string } {
     console.warn(`[omniroute] ${path} is malformed JSON: ${(err as Error).message}`);
     return {};
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.warn(`[omniroute] ${path} root is not a plain object; treating as empty config`);
+    return {};
+  }
   const root = parsed as Record<string, unknown>;
   const search = root["search"];
-  if (!search || typeof search !== "object" || Array.isArray(search)) return {};
+  if (!search || typeof search !== "object" || Array.isArray(search)) {
+    console.warn(`[omniroute] ${path} \`search\` field is not a plain object; treating as empty config`);
+    return {};
+  }
   const provider = (search as Record<string, unknown>)["provider"];
-  if (typeof provider !== "string") return {};
+  if (typeof provider !== "string") {
+    console.warn(`[omniroute] ${path} \`search.provider\` is not a string; treating as empty config`);
+    return {};
+  }
   return { provider };
 }
 

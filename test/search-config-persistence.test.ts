@@ -85,6 +85,48 @@ test("readOmnirouteConfig: provider present but not a string returns {}", () => 
   assert.deepEqual(readOmnirouteConfig(), {});
 });
 
+test("readOmnirouteConfig: non-object root warns exactly once (spec G6)", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify(42));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  try {
+    readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "expected exactly one console.warn for non-object root");
+});
+
+test("readOmnirouteConfig: non-object search warns exactly once (spec G7)", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ search: 42 }));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  try {
+    readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "expected exactly one console.warn for non-object search");
+});
+
+test("readOmnirouteConfig: non-string provider warns exactly once", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ search: { provider: 42 } }));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  try {
+    readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "expected exactly one console.warn for non-string provider");
+});
+
 test("writeOmnirouteConfig: write failure (read-only dir) warns but does not throw", () => {
   writeOmnirouteConfig("tavily-search");
   chmodSync(dir, 0o500);  // read+execute only
