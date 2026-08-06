@@ -9,7 +9,30 @@ import { webFetchTool } from "./tools/web-fetch.ts";
 
 type OmnirouteModel = Model<"openai-completions">;
 
-function toOmnirouteModel(m: { id: string }, baseUrl: string): OmnirouteModel {
+interface OmnirouteModelEntry {
+  id: string;
+  name?: string;
+  context_length?: number;
+  max_input_tokens?: number;
+  max_output_tokens?: number;
+  capabilities?: {
+    tool_calling?: boolean;
+    reasoning?: boolean;
+    thinking?: boolean;
+    temperature?: boolean;
+    vision?: boolean;
+  };
+  input_modalities?: string[];
+}
+
+function pickInt(...vs: Array<number | undefined>): number | undefined {
+  for (const v of vs) {
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+  }
+  return undefined;
+}
+
+function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteModel {
   const result: OmnirouteModel = {
     id: m.id,
     name: m.id,
@@ -19,7 +42,7 @@ function toOmnirouteModel(m: { id: string }, baseUrl: string): OmnirouteModel {
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
+    contextWindow: pickInt(m.max_input_tokens, m.context_length) ?? 128000,
     maxTokens: 4096,
   };
   return result;
@@ -40,7 +63,7 @@ export default async function (pi: ExtensionAPI) {
     async refreshModels({ signal }) {
       const res = await fetch(`${baseUrl}/models`, { signal });
       if (!res.ok) throw new Error(`OmniRoute /models failed: ${res.status}`);
-      const { data } = (await res.json()) as { data: Array<{ id: string }> };
+      const { data } = (await res.json()) as { data: OmnirouteModelEntry[] };
       models = data.map((m) => toOmnirouteModel(m, baseUrl));
     },
     stream: (
