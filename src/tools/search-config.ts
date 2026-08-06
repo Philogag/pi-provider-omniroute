@@ -2,6 +2,7 @@
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
 import { Container, SettingsList, type Component } from "@earendil-works/pi-tui";
+import type { TUI } from "@earendil-works/pi-tui";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -355,4 +356,117 @@ export function writeOmnirouteConfig(provider: string | undefined): void {
     console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
     try { unlinkSync(tmp); } catch { /* ignore */ }
   }
+}
+
+// --- Menu state machine ---
+
+export interface MenuStateMachineDeps {
+  readonly resolveApiKey: (ctx: unknown) => Promise<string | undefined>;
+  readonly resolveBaseUrl: (ctx: unknown) => string;
+  readonly initialCurrentProvider: string | undefined;
+  readonly theme: ReturnType<typeof getSettingsListTheme>;
+  readonly onCommitPersist: (provider: string | undefined) => void;
+  readonly onClose: () => void;
+}
+
+export interface MenuStateMachine {
+  getComponent(tui: TUI, theme: ReturnType<typeof getSettingsListTheme>): Component;
+  onActivateSearchProvider(): void;
+  onCommit(provider: string | undefined): void;
+  onCancel(): void;
+  onEsc(): void;
+  readonly mode: () => "top" | "sub";
+  readonly catalog: () => SearchCatalog | undefined;
+}
+
+export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMachine {
+  let mode: "top" | "sub" = "top";
+  let currentProvider = deps.initialCurrentProvider;
+  let catalogValue: SearchCatalog | undefined = undefined;
+  let pendingFetch: AbortController | undefined;
+  let ctxRef: unknown = undefined;
+
+  const fetchCatalogAsync = async (ctx: unknown): Promise<void> => {
+    pendingFetch = new AbortController();
+    const apiKey = await deps.resolveApiKey(ctx);
+    if (!apiKey) {
+      // Caller is expected to handle the missing key via onClose path; we set no catalog and let the caller decide.
+      return;
+    }
+    const baseUrl = deps.resolveBaseUrl(ctx);
+    try {
+      const c = await resolveSearchCatalog(baseUrl, apiKey, pendingFetch.signal);
+      if (mode !== "sub") return;  // user already Esc'd
+      catalogValue = c;
+    } catch {
+      // Already handled by resolveSearchCatalog; nothing to do.
+    }
+  };
+
+  return {
+    mode: () => mode,
+    catalog: () => catalogValue,
+    onActivateSearchProvider: () => {
+      mode = "sub";
+      catalogValue = undefined;
+      // Caller must call fetchCatalogAsync separately (to pass ctx); see command wiring in Task 9.
+    },
+    onCommit: (provider) => {
+      currentProvider = provider;
+      deps.onCommitPersist(provider);
+      mode = "top";
+      catalogValue = undefined;
+    },
+    onCancel: () => {
+      mode = "top";
+      catalogValue = undefined;
+    },
+    onEsc: () => {
+      mode = "top";
+      catalogValue = undefined;
+      deps.onClose();
+    },
+    getComponent: (tui, theme) => {
+      if (mode === "top") {
+        return renderTopLevelMenu({
+          currentProvider,
+          theme,
+          onActivateSearchProvider: () => {
+            mode = "sub";
+            tui.requestRender();
+            // Async catalog fetch is initiated by the command handler (Task 9) with the right ctx.
+            void fetchCatalogAsync(ctxRef);
+          },
+        });
+      }
+      // mode === "sub"
+      if (!catalogValue) {
+        const loading: Component = {
+          render: () => ["Loading search providers…"],
+          invalidate: () => {},
+          handleInput: (data: string) => {
+            if (data === "\x1b") { mode = "top"; tui.requestRender(); }
+          },
+        };
+        return loading;
+      }
+      return renderProviderSubmenu({
+        currentProvider,
+        catalog: catalogValue,
+        theme,
+        onCommit: (p) => {
+          currentProvider = p;
+          deps.onCommitPersist(p);
+          mode = "top";
+          catalogValue = undefined;
+          tui.requestRender();
+        },
+        onCancel: () => {
+          mode = "top";
+          catalogValue = undefined;
+          tui.requestRender();
+        },
+      });
+    },
+  } as MenuStateMachine;
 }
