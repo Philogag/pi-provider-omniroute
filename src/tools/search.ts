@@ -4,22 +4,8 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
 
-export const SEARCH_PROVIDERS = [
-  "serper-search",
-  "brave-search",
-  "perplexity-search",
-  "exa-search",
-  "tavily-search",
-  "firecrawl",
-  "google-pse-search",
-  "linkup-search",
-  "ollama-search",
-  "searchapi-search",
-  "youcom-search",
-  "searxng-search",
-  "zai-search",
-  "duckduckgo-free",
-] as const;
+import { STATIC_FALLBACK_PROVIDERS } from "./search-config.ts";
+export const SEARCH_PROVIDERS = STATIC_FALLBACK_PROVIDERS;
 export const SEARCH_TYPES = ["web", "news"] as const;
 export const TIME_RANGES = ["any", "hour", "day", "week", "month", "year"] as const;
 

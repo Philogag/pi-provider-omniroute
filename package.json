@@ -20,6 +20,10 @@
     "@earendil-works/pi-coding-agent": "latest",
     "@sinclair/typebox": "latest"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-tui": "0.83.0",
+    "@earendil-works/pi-coding-agent": "*"
+  },
   "devDependencies": {
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3"
