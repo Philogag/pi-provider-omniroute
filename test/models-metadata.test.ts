@@ -105,3 +105,35 @@ test("reasoning: capabilities 整体缺失时禁用", async () => {
   const [m] = await refreshOnce([{ id: "m3" }]);
   assert.equal(m.reasoning, false);
 });
+
+test("input: capabilities.vision 为 true 时声明图片输入", async () => {
+  const [m] = await refreshOnce([{ id: "m1", capabilities: { vision: true } }]);
+  assert.deepEqual(m.input, ["text", "image"]);
+});
+
+test("input: input_modalities 含 image 时声明图片输入", async () => {
+  const [m] = await refreshOnce([
+    { id: "m2", input_modalities: ["text", "image"] },
+  ]);
+  assert.deepEqual(m.input, ["text", "image"]);
+});
+
+test("input: 无视觉证据时仅声明文本", async () => {
+  const [m] = await refreshOnce([{ id: "m3" }]);
+  assert.deepEqual(m.input, ["text"]);
+});
+
+test("name: 存在时使用该值", async () => {
+  const [m] = await refreshOnce([{ id: "openai/gpt-4o", name: "GPT-4o" }]);
+  assert.equal(m.name, "GPT-4o");
+});
+
+test("name: 缺失时回退 id", async () => {
+  const [m] = await refreshOnce([{ id: "auto/best-coding" }]);
+  assert.equal(m.name, "auto/best-coding");
+});
+
+test("name: 非字符串时回退 id", async () => {
+  const [m] = await refreshOnce([{ id: "m6", name: 42 }]);
+  assert.equal(m.name, "m6");
+});

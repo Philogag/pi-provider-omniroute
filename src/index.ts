@@ -35,12 +35,15 @@ function pickInt(...vs: Array<number | undefined>): number | undefined {
 function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteModel {
   const result: OmnirouteModel = {
     id: m.id,
-    name: m.id,
+    name: typeof m.name === "string" ? m.name : m.id,
     api: "openai-completions" as const,
     provider: "omniroute",
     baseUrl,
     reasoning: m.capabilities?.reasoning === true,
-    input: ["text"],
+    input:
+      m.capabilities?.vision === true || m.input_modalities?.includes("image")
+        ? ["text", "image"]
+        : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: pickInt(m.max_input_tokens, m.context_length) ?? 128000,
     maxTokens: pickInt(m.max_output_tokens) ?? 4096,
