@@ -4,8 +4,12 @@ import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } fro
 import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
 import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
 import { resolveStoredBaseUrl } from "./auth-credentials.ts";
-import { searchTool } from "./tools/search.ts";
+import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool } from "./tools/web-fetch.ts";
+import { readOmnirouteConfig } from "./tools/search-config.ts";
+
+let currentConfigProvider: string | undefined = undefined;
+setSearchConfigReader(() => currentConfigProvider);
 
 type OmnirouteModel = Model<"openai-completions">;
 
@@ -102,6 +106,14 @@ export default async function (pi: ExtensionAPI) {
       console.warn(`[omniroute] failed to register tool ${tool.name}:`, err);
     }
   }
+
+  // Load persisted search provider config (omniroute.json) on session start.
+  // Optional call: the host may not implement `on` (e.g. test doubles for the
+  // existing use-models-metadata mock which only registers provider + tool).
+  pi.on?.("session_start", async () => {
+    const cfg = readOmnirouteConfig();
+    currentConfigProvider = cfg.provider;
+  });
 }
 
 
