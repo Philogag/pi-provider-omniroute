@@ -361,8 +361,11 @@ export function writeOmnirouteConfig(provider: string | undefined): void {
 // --- Menu state machine ---
 
 export interface MenuStateMachineDeps {
-  readonly resolveApiKey: (ctx: unknown) => Promise<string | undefined>;
-  readonly resolveBaseUrl: (ctx: unknown) => string;
+  // These are bound (ctx-free) so the caller can inject the real command ctx
+  // as a factory-time closure (see the /omniroute-settings handler). This avoids
+  // threading an unset ctxRef through the machine's internal fetch path.
+  readonly resolveApiKey: () => Promise<string | undefined>;
+  readonly resolveBaseUrl: () => string;
   readonly initialCurrentProvider: string | undefined;
   readonly theme: ReturnType<typeof getSettingsListTheme>;
   readonly onCommitPersist: (provider: string | undefined) => void;
@@ -384,16 +387,15 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   let currentProvider = deps.initialCurrentProvider;
   let catalogValue: SearchCatalog | undefined = undefined;
   let pendingFetch: AbortController | undefined;
-  let ctxRef: unknown = undefined;
 
-  const fetchCatalogAsync = async (ctx: unknown): Promise<void> => {
+  const fetchCatalogAsync = async (): Promise<void> => {
     pendingFetch = new AbortController();
-    const apiKey = await deps.resolveApiKey(ctx);
+    const apiKey = await deps.resolveApiKey();
     if (!apiKey) {
       // Caller is expected to handle the missing key via onClose path; we set no catalog and let the caller decide.
       return;
     }
-    const baseUrl = deps.resolveBaseUrl(ctx);
+    const baseUrl = deps.resolveBaseUrl();
     try {
       const c = await resolveSearchCatalog(baseUrl, apiKey, pendingFetch.signal);
       if (mode !== "sub") return;  // user already Esc'd
@@ -434,8 +436,9 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           onActivateSearchProvider: () => {
             mode = "sub";
             tui.requestRender();
-            // Async catalog fetch is initiated by the command handler (Task 9) with the right ctx.
-            void fetchCatalogAsync(ctxRef);
+            // Resolvers are bound closures (injecting the command ctx), so the
+            // fetch already has everything it needs.
+            void fetchCatalogAsync();
           },
         });
       }
