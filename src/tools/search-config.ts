@@ -389,7 +389,8 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   let pendingFetch: AbortController | undefined;
 
   const fetchCatalogAsync = async (): Promise<void> => {
-    pendingFetch = new AbortController();
+    const controller = new AbortController();
+    pendingFetch = controller;
     const apiKey = await deps.resolveApiKey();
     if (!apiKey) {
       // Caller is expected to handle the missing key via onClose path; we set no catalog and let the caller decide.
@@ -397,8 +398,11 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
     }
     const baseUrl = deps.resolveBaseUrl();
     try {
-      const c = await resolveSearchCatalog(baseUrl, apiKey, pendingFetch.signal);
-      if (mode !== "sub") return;  // user already Esc'd
+      const c = await resolveSearchCatalog(baseUrl, apiKey, controller.signal);
+      // Only apply if this is still the current fetch and the user is still in sub
+      // mode. A later onActivateSearchProvider may have replaced pendingFetch, and
+      // a reset path may have aborted the in-flight request; both make this stale.
+      if (pendingFetch !== controller || mode !== "sub") return;
       catalogValue = c;
     } catch {
       // Already handled by resolveSearchCatalog; nothing to do.
@@ -414,16 +418,19 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       // Caller must call fetchCatalogAsync separately (to pass ctx); see command wiring in Task 9.
     },
     onCommit: (provider) => {
+      pendingFetch?.abort();
       currentProvider = provider;
       deps.onCommitPersist(provider);
       mode = "top";
       catalogValue = undefined;
     },
     onCancel: () => {
+      pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
     },
     onEsc: () => {
+      pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
       deps.onClose();
@@ -448,7 +455,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           render: () => ["Loading search providers…"],
           invalidate: () => {},
           handleInput: (data: string) => {
-            if (data === "\x1b") { mode = "top"; tui.requestRender(); }
+            if (data === "\x1b") { pendingFetch?.abort(); mode = "top"; tui.requestRender(); }
           },
         };
         return loading;
@@ -458,6 +465,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         catalog: catalogValue,
         theme,
         onCommit: (p) => {
+          pendingFetch?.abort();
           currentProvider = p;
           deps.onCommitPersist(p);
           mode = "top";
@@ -465,6 +473,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           tui.requestRender();
         },
         onCancel: () => {
+          pendingFetch?.abort();
           mode = "top";
           catalogValue = undefined;
           tui.requestRender();
