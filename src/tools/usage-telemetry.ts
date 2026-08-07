@@ -96,7 +96,7 @@ export function createTelemetryTransformStream(): TelemetryTransform {
     },
     flush() {
       // writable closed → readable ends naturally; nothing to terminate.
-      const parsed = parseOmnirouteTelemetryLine(buffer); // no trailing newline
+      const parsed = parseOmnirouteTelemetryLine(buffer.replace(/\r$/, "")); // tolerate CRLF without trailing newline
       if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
       buffer = "";
     },

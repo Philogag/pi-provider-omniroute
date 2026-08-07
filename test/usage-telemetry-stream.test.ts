@@ -67,6 +67,17 @@ test("createTelemetryTransformStream parses CRLF telemetry lines", async () => {
   assert.deepEqual(getTelemetry(), { responseCost: 0.5 });
 });
 
+test("createTelemetryTransformStream parses CRLF line without trailing newline (flush)", async () => {
+  const { stream, getTelemetry } = createTelemetryTransformStream();
+  const reader = stream.readable.getReader();
+  const drain = (async () => { while (!(await reader.read()).done) { /* drain */ } })();
+  const w = stream.writable.getWriter();
+  await w.write(new TextEncoder().encode("data: [DONE]\r\n: x-omniroute-response-cost=0.5\r"));
+  await w.close();
+  await drain;
+  assert.deepEqual(getTelemetry(), { responseCost: 0.5 });
+});
+
 test("createTelemetryTransformStream decodes multibyte UTF-8 across chunks", async () => {
   const { stream, getTelemetry } = createTelemetryTransformStream();
   const reader = stream.readable.getReader();
