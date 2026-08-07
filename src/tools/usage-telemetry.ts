@@ -85,7 +85,7 @@ export function createTelemetryTransformStream(): TelemetryTransform {
       // process complete lines
       let idx: number;
       while ((idx = buffer.indexOf("\n")) !== -1) {
-        const line = buffer.slice(0, idx);
+        const line = buffer.slice(0, idx).replace(/\r$/, ""); // tolerate CRLF
         buffer = buffer.slice(idx + 1);
         const parsed = parseOmnirouteTelemetryLine(line);
         if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
@@ -120,8 +120,9 @@ export function withOmnirouteFetch(
       const t = getTelemetry();
       if (t) onTelemetry?.(t);
     })();
-    // Note: errors in `pipe` are swallowed intentionally — telemetry is best-effort.
-    void consumed;
+    // Note: rejections from `pipe` (e.g. body aborted mid-stream) are caught here —
+    // telemetry stays best-effort and the caller's response stream is unaffected.
+    void consumed.catch(() => {});
     return new Response(stream.readable, res);
   };
 }

@@ -55,6 +55,17 @@ test("createTelemetryTransformStream handles no trailing newline (flush)", async
   assert.deepEqual(getTelemetry(), { tokensIn: 88 });
 });
 
+test("createTelemetryTransformStream parses CRLF telemetry lines", async () => {
+  const { stream, getTelemetry } = createTelemetryTransformStream();
+  const reader = stream.readable.getReader();
+  const drain = (async () => { while (!(await reader.read()).done) { /* drain */ } })();
+  const w = stream.writable.getWriter();
+  await w.write(new TextEncoder().encode("data: [DONE]\r\n: x-omniroute-response-cost=0.5\r\n"));
+  await w.close();
+  await drain;
+  assert.deepEqual(getTelemetry(), { responseCost: 0.5 });
+});
+
 test("createTelemetryTransformStream decodes multibyte UTF-8 across chunks", async () => {
   const { stream, getTelemetry } = createTelemetryTransformStream();
   const reader = stream.readable.getReader();
@@ -65,8 +76,8 @@ test("createTelemetryTransformStream decodes multibyte UTF-8 across chunks", asy
   const enc = new TextEncoder();
   const w = stream.writable.getWriter();
   const half = enc.encode("data: {\"content\":\"中");
-  await w.write(half.subarray(0, 5));
-  await w.write(half.subarray(5));
+  await w.write(half.subarray(0, 19)); // ends mid-codepoint: last byte is 0xE4 of 中
+  await w.write(half.subarray(19)); // starts at 0xB8, completing 中 across chunks
   await w.write(enc.encode("文\"}\n: x-omniroute-model=m\n"));
   await w.close();
   await readPromise;
