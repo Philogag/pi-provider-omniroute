@@ -102,6 +102,23 @@ test("session_start: fetch config does not leak into search tool", async () => {
   writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ fetch: { provider: "firecrawl" } }));
   await entry(mockPi());
   await capturedSessionStart!({}, sessionCtx() as never);
-  // search reader is untouched by fetch config (run searchTool directly).
-  assert.equal(await effectiveProviderForFetch(), "firecrawl");
+  // fetch.provider must NOT flow into the search tool's request body.
+  const original = globalThis.fetch;
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ results: [] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await searchTool.execute(
+      "call-1",
+      { query: "hello" } as never,
+      undefined,
+      undefined,
+      fakeCtx("test-key"),
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal(body.provider, undefined);
 });
