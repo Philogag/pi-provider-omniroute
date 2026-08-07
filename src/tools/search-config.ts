@@ -1,7 +1,7 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
-import { Container, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
+import { Container, Loader, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { TUI } from "@earendil-works/pi-tui";
 import { DynamicBorder, getSelectListTheme, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
@@ -432,19 +432,28 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       }
       // mode === "sub"
       if (!catalogValue) {
-        const loading: Component = {
-          render: () => ["Loading search providers…"],
-          invalidate: () => {},
-          handleInput: (data: string) => {
-            if (data === "\x1b") {
-              cachedSubmenu = undefined;
-              pendingFetch?.abort();
-              mode = "top";
-              tui.requestRender();
-            }
-          },
+        // Official Loader (frames disabled — pure text, no timer in tests);
+        // Esc-back handling stays here since the Loader has no handleInput.
+        const loader = new Loader(
+          tui,
+          (s: string) => theme.fg("accent", s),
+          (s: string) => theme.fg("dim", s),
+          "Loading search providers…",
+          { frames: [] },
+        );
+        const container = new Container();
+        container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+        container.addChild(loader as unknown as Component);
+        container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+        (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+          if (data === "\x1b") {
+            cachedSubmenu = undefined;
+            pendingFetch?.abort();
+            mode = "top";
+            tui.requestRender();
+          }
         };
-        return loading;
+        return container as unknown as Component;
       }
       if (cachedSubmenu) return cachedSubmenu;
       cachedSubmenu = renderProviderSubmenu({
