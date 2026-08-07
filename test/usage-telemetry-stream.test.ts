@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createTelemetryTransformStream, withOmnirouteFetch, type OmnirouteTelemetry } from "../src/tools/usage-telemetry.ts";
+import { createAssistantMessageEventStream, type AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { createTelemetryTransformStream, withOmnirouteFetch, wrapStreamWithCost, type OmnirouteTelemetry } from "../src/tools/usage-telemetry.ts";
 
 test("createTelemetryTransformStream passes bytes through unchanged", async () => {
   const { stream, getTelemetry } = createTelemetryTransformStream();
@@ -110,4 +111,80 @@ test("withOmnirouteFetch reports no telemetry when absent", async () => {
   const wrapped = withOmnirouteFetch(inner as typeof fetch, (t) => { reported = t; });
   await wrapped("https://example.com/v1/chat/completions", {} as RequestInit);
   assert.equal(reported, undefined);
+});
+
+// --- Task 3: wrapStreamWithCost ---
+
+function makeSource(events: Array<{ type: string; message?: any }>, doneMessage?: any): AssistantMessageEventStream {
+  const s = createAssistantMessageEventStream();
+  for (const e of events) s.push(e as never);
+  if (doneMessage) s.push({ type: "done", message: doneMessage } as never);
+  s.end(doneMessage);
+  return s;
+}
+
+function makeMessage() {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "hi" }],
+    usage: {
+      input: 88, output: 13, cacheRead: 0, cacheWrite: 0, totalTokens: 101,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 1,
+  };
+}
+
+test("wrapStreamWithCost resolves telemetry via getter at done time", async () => {
+  const msg = makeMessage();
+  const src = makeSource([], msg);
+  let current: OmnirouteTelemetry | undefined = { responseCost: 0.5 };
+  const out = wrapStreamWithCost(src, () => current);
+  current = { responseCost: 0.75 }; // simulate telemetry arriving after stream starts
+  const result = await out.result();
+  assert.equal(result.usage.cost.total, 0.75);
+});
+
+test("wrapStreamWithCost overwrites cost.total and appends diagnostic on done", async () => {
+  const msg = makeMessage();
+  const src = makeSource([{ type: "text_start", message: msg }], msg);
+  const telemetry: OmnirouteTelemetry = { responseCost: 0.00001904, tokensIn: 88, tokensOut: 13, model: "m", provider: "p", cacheHit: false };
+  const out = wrapStreamWithCost(src, telemetry);
+  const result = await out.result();
+  assert.equal(result.usage.cost.total, 0.00001904);
+  const diag = result.diagnostics!.find((d: any) => d.type === "omniroute-telemetry");
+  assert.ok(diag, "diagnostic attached");
+  assert.equal(diag.details!.responseCost, 0.00001904);
+  assert.equal(diag.details!.cacheHit, false);
+  assert.equal(result.usage.input, 88); // token counts untouched
+  assert.equal(result.usage.cost.input, 0); // cost sub-fields untouched
+});
+
+test("wrapStreamWithCost forwards all events in order", async () => {
+  const msg = makeMessage();
+  const src = makeSource([{ type: "text_start", message: msg }], msg);
+  const out = wrapStreamWithCost(src, { responseCost: 0.1 });
+  const types: string[] = [];
+  for await (const ev of out) types.push(ev.type as string);
+  assert.deepEqual(types, ["text_start", "done"]);
+});
+
+test("wrapStreamWithCost leaves message alone without telemetry", async () => {
+  const msg = makeMessage();
+  const src = makeSource([], msg);
+  const out = wrapStreamWithCost(src, undefined);
+  const result = await out.result();
+  assert.equal(result.usage.cost.total, 0);
+  assert.equal(result.diagnostics, undefined);
+});
+
+test("wrapStreamWithCost forwards error events unchanged", async () => {
+  const src = createAssistantMessageEventStream();
+  src.push({ type: "error", error: new Error("boom") } as never);
+  src.end(new Error("boom") as never);
+  const out = wrapStreamWithCost(src, { responseCost: 0.5 });
+  const result = await out.result();
+  assert.ok(result instanceof Error);
+  assert.equal((result as Error).message, "boom");
 });

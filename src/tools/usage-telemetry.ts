@@ -5,6 +5,9 @@
 // `data: [DONE]`. The openai SDK's SSE parser ignores comment lines, so pi-ai
 // never sees them — we intercept the byte stream and parse them ourselves.
 
+import { createAssistantMessageEventStream, appendAssistantMessageDiagnostic } from "@earendil-works/pi-ai";
+import type { AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
+
 export interface OmnirouteTelemetry {
   responseCost?: number;
   tokensIn?: number;
@@ -125,4 +128,50 @@ export function withOmnirouteFetch(
     void consumed.catch(() => {});
     return new Response(stream.readable, res);
   };
+}
+
+/**
+ * Wraps a pi-ai AssistantMessageEventStream so that on completion (`done`)
+ * the OmniRoute-reported cost overwrites `message.usage.cost.total` and the
+ * full telemetry is attached to `message.diagnostics`. Without telemetry the
+ * stream is forwarded untouched.
+ */
+export function wrapStreamWithCost(
+  stream: AssistantMessageEventStream,
+  telemetry: OmnirouteTelemetry | undefined | (() => OmnirouteTelemetry | undefined),
+): AssistantMessageEventStream {
+  const out = createAssistantMessageEventStream();
+  const pump = async () => {
+    try {
+      for await (const event of stream) {
+        if (event.type === "done") {
+          const t =
+            typeof telemetry === "function" ? telemetry() : telemetry;
+          if (t?.responseCost !== undefined) {
+            const message = event.message as AssistantMessage;
+            message.usage.cost.total = t.responseCost;
+            appendAssistantMessageDiagnostic(message, {
+              type: "omniroute-telemetry",
+              timestamp: Date.now(),
+              details: {
+                responseCost: t.responseCost,
+                tokensIn: t.tokensIn,
+                tokensOut: t.tokensOut,
+                model: t.model,
+                provider: t.provider,
+                cacheHit: t.cacheHit,
+              },
+            });
+          }
+        }
+        out.push(event);
+      }
+    } catch {
+      // Best-effort: if the source stream errors mid-way, terminate output.
+    } finally {
+      out.end();
+    }
+  };
+  void pump();
+  return out;
 }
