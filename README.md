@@ -15,9 +15,13 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
   - **Interactive login** — `/login` prompts for an API key and base URL, with retry on invalid URLs and a sensible default of `http://localhost:20128/v1`.
   - **Auto-imported models** — at startup, fetches `GET /v1/models` and registers every routed model (e.g. `openai/gpt-4o`) as a Pi model.
   - **Lazy model refresh** — model list is fetched on demand, not eagerly on extension load, so Pi starts even if OmniRoute is offline.
+- **Settings**
+  - **`/omniroute-settings` TUI menu** — a two-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback) or a default **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), each with a `✓` marker on the currently active entry.
+  - **Persistent config** — choices are saved to the pi-global `omniroute.json` (`search.provider` / `fetch.provider`) and re-loaded on every session start.
 - **Tool**
   - **`omniroute_web_search` tool** — wraps `POST /v1/search` with 14 search providers, 2 search types, 7 time ranges, country/language filters, and rich content extraction options.
   - **`omniroute_web_fetch` tool** — wraps `POST /v1/web/fetch` with 4 fetch providers (Firecrawl, Jina Reader, Tavily Extract, TinyFish), 4 output formats, depth, and selector wait.
+  - **Configurable default provider** — both tools merge their `provider` param with the configured default at execution time (explicit param > configured provider > omit), so you can pin a default provider in `/omniroute-settings` without changing how the model calls the tools.
 
 ## Requirements
 
@@ -36,6 +40,25 @@ Then connect into your OmniRoute instance with `/login omniroute` and paste your
 > Get the "OmniRoute base URL" from your OmniRoute Dashboard  
 > -> "Endpoints" -> "API Endpoint" -> "Public"  
 > Which should looks like "http://localhost:20128/v1"   
+
+## Default tool providers
+
+Both tools send their requests without a `provider` field unless one is explicitly given by the model. To pin a default provider for every call, use the built-in settings menu:
+
+```text
+/omniroute-settings
+```
+
+This opens an interactive TUI menu (top-level → provider submenu) with the currently enabled provider marked with `✓`. Selections are persisted to the pi-global config file at `$PI_AGENT_DIR/omniroute.json` (or `~/.pi/agent/omniroute.json`):
+
+```json
+{
+  "search": { "provider": "tavily-search" },
+  "fetch": { "provider": "jina-reader" }
+}
+```
+
+At execution time each tool resolves its provider as **explicit param > configured default > omit** — e.g. with the config above, `omniroute_web_search` without a `provider` param uses `tavily-search`, and `omniroute_web_fetch` without one uses `jina-reader`. Pick `auto` in the menu to clear the stored provider and fall back to the server default.
 
 ## Development
 
@@ -60,6 +83,7 @@ src/
     http.ts             # Shared HTTP helper, credential resolver, error contract
     search.ts           # omniroute_web_search
     web-fetch.ts        # omniroute_web_fetch
+    search-config.ts    # /omniroute-settings menu state machine + omniroute.json persistence
 test/                   # Mirrors src/ layout
 docs/
   roadmap.md            # Long-term plan (phases 1–4)

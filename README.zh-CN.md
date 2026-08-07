@@ -15,6 +15,9 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
 - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
 - **交互式登录** —— `/login` 时依次提示输入 API key 与 base URL，URL 非法可重试一次，默认值 `http://localhost:20128/v1`。
 - **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
+- **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，当前启用项行首标 `✓`。
+- **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider`），每次会话启动自动加载。
+- **可配置默认 provider** —— 两个工具执行时按"显式入参 > 已配置 > 省略"合并 `provider` 字段，在 `/omniroute-settings` 固定默认值，无需改变模型的调用方式。
 - **TypeBox 校验入参** —— 工具入参由 Pi 做静态校验。
 
 ## 环境要求
@@ -96,6 +99,25 @@ pi --list-models | grep omniroute
 
 模型会调用 `omniroute_web_fetch`，传入 `url`，`format` 默认 `markdown`。
 
+### 默认 provider 配置
+
+两个工具在模型未显式传入 `provider` 时，请求体不带该字段。如需为每次调用固定默认 provider，可打开内置设置菜单：
+
+```text
+/omniroute-settings
+```
+
+菜单为两级交互式（顶层 → provider 子面板），当前启用的 provider 行首标 `✓`。选择会持久化到 pi 全局配置文件 `$PI_AGENT_DIR/omniroute.json`（或 `~/.pi/agent/omniroute.json`）：
+
+```json
+{
+  "search": { "provider": "tavily-search" },
+  "fetch": { "provider": "jina-reader" }
+}
+```
+
+执行时各工具按 **显式入参 > 已配置 > 省略** 解析 provider——例如以上配置下，`omniroute_web_search` 未传 `provider` 时用 `tavily-search`，`omniroute_web_fetch` 未传时用 `jina-reader`。在菜单中选择 `auto` 可清除已存 provider，回退到服务端默认。
+
 ## 开发
 
 ```bash
@@ -119,6 +141,7 @@ src/
     http.ts             # HTTP 工具、凭据解析、错误约定
     search.ts           # omniroute_web_search
     web-fetch.ts        # omniroute_web_fetch
+    search-config.ts    # /omniroute-settings 菜单状态机 + omniroute.json 持久化
 test/                   # 与 src/ 镜像
 docs/
   roadmap.md            # 长期规划（阶段 1–4）
