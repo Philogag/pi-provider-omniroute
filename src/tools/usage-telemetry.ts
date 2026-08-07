@@ -59,7 +59,7 @@ export function extractOmnirouteTelemetry(
   text: string,
 ): OmnirouteTelemetry | undefined {
   let result: OmnirouteTelemetry | undefined;
-  for (const line of text.split("\n")) {
+  for (const line of text.split(/\r?\n/)) {
     const parsed = parseOmnirouteTelemetryLine(line);
     if (parsed) {
       result = { ...(result ?? {}), ...parsed };

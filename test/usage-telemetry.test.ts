@@ -64,6 +64,19 @@ test("extractOmnirouteTelemetry merges multiple lines", () => {
   });
 });
 
+test("extractOmnirouteTelemetry handles CRLF line endings", () => {
+  const text = [
+    "data: {\"choices\":[]}",
+    ": x-omniroute-cache-hit=true",
+    ": x-omniroute-response-cost=0.0000190400",
+    "data: [DONE]",
+  ].join("\r\n");
+  assert.deepEqual(extractOmnirouteTelemetry(text), {
+    cacheHit: true,
+    responseCost: 0.00001904,
+  });
+});
+
 test("extractOmnirouteTelemetry returns undefined when no telemetry", () => {
   assert.equal(extractOmnirouteTelemetry("data: [DONE]"), undefined);
   assert.equal(extractOmnirouteTelemetry(""), undefined);
