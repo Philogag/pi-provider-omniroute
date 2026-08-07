@@ -67,3 +67,61 @@ export function extractOmnirouteTelemetry(
   }
   return result;
 }
+
+export interface TelemetryTransform {
+  stream: TransformStream<Uint8Array, Uint8Array>;
+  getTelemetry: () => OmnirouteTelemetry | undefined;
+}
+
+/** Byte-transparent TransformStream that also parses OmniRoute telemetry lines. */
+export function createTelemetryTransformStream(): TelemetryTransform {
+  let buffer = "";
+  let telemetry: OmnirouteTelemetry | undefined;
+  const decoder = new TextDecoder();
+  const transform = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk); // pass bytes through untouched
+      buffer += decoder.decode(chunk, { stream: true });
+      // process complete lines
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        const parsed = parseOmnirouteTelemetryLine(line);
+        if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
+      }
+    },
+    flush() {
+      // writable closed → readable ends naturally; nothing to terminate.
+      const parsed = parseOmnirouteTelemetryLine(buffer); // no trailing newline
+      if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
+      buffer = "";
+    },
+  });
+  return {
+    stream: transform,
+    getTelemetry: () => telemetry,
+  };
+}
+
+/** Wraps a fetch impl: pipes response bodies through a telemetry transform. */
+export function withOmnirouteFetch(
+  fetchImpl: typeof fetch,
+  onTelemetry?: (t: OmnirouteTelemetry) => void,
+): typeof fetch {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const res = await fetchImpl(input, init);
+    if (!res.ok || !res.body) return res;
+    const { stream, getTelemetry } = createTelemetryTransformStream();
+    const pipe = res.body.pipeTo(stream.writable);
+    // Read the transformed stream; report telemetry once the body is fully consumed.
+    const consumed = (async () => {
+      await pipe;
+      const t = getTelemetry();
+      if (t) onTelemetry?.(t);
+    })();
+    // Note: errors in `pipe` are swallowed intentionally — telemetry is best-effort.
+    void consumed;
+    return new Response(stream.readable, res);
+  };
+}
