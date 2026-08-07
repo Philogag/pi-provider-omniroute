@@ -1,6 +1,5 @@
 // src/index.ts — pi extension entry
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
@@ -136,29 +135,25 @@ export default async function (pi: ExtensionAPI) {
         ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.", "error");
         return;
       }
-      const smTheme = getSettingsListTheme();
-      // The resolvers below are bound closures capturing the command ctx, which
-      // injects the real ctx into the state machine's async catalog fetch.
       const sm = createMenuStateMachine({
         resolveApiKey: () => resolveApiKey(ctx),
         resolveBaseUrl: () => resolveBaseUrl(ctx),
         initialCurrentProvider: currentConfigProvider,
-        theme: smTheme,
         onCommitPersist: (provider) => {
           currentConfigProvider = provider;
           writeOmnirouteConfig(provider);
         },
         onClose: () => {},
       });
-      await ctx.ui.custom((tui, _theme, _kb, done) => {
+      await ctx.ui.custom((tui, theme, _kb, done) => {
         // Resolve the component fresh on each frame/input so the wrapped render
         // and handleInput always delegate to the current mode's component. The
         // state machine's getComponent returns a fresh component reflecting the
         // live mode ("top" vs "sub"), so capturing it once would freeze the
         // wrapper to mode "top" and the provider submenu would never render.
         const wrapped: Component = {
-          render: (w: number) => sm.getComponent(tui, smTheme).render(w),
-          invalidate: () => sm.getComponent(tui, smTheme).invalidate(),
+          render: (w: number) => sm.getComponent(tui, theme).render(w),
+          invalidate: () => sm.getComponent(tui, theme).invalidate(),
           handleInput: (data: string) => {
             // Top-level Esc closes the overlay; submenu Esc is forwarded to the
             // current mode's component which handles its own cancel/back.
@@ -166,7 +161,7 @@ export default async function (pi: ExtensionAPI) {
               done(undefined);
               return;
             }
-            sm.getComponent(tui, smTheme).handleInput?.(data);
+            sm.getComponent(tui, theme).handleInput?.(data);
             tui.requestRender();
           },
         };

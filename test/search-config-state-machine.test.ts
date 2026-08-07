@@ -1,7 +1,10 @@
 import { test, mock, after } from "node:test";
 import assert from "node:assert/strict";
+import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { createMenuStateMachine, type MenuStateMachineDeps } from "../src/tools/search-config.ts";
 import type { TUI } from "@earendil-works/pi-tui";
+
+initTheme();  // getComponent 构建 renderTopLevelMenu/renderProviderSubmenu 时 keyHint() 需要全局 theme
 
 const origFetch = globalThis.fetch;
 after(() => { globalThis.fetch = origFetch; mock.restoreAll(); });
@@ -14,7 +17,10 @@ function jsonResponse(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
-const fakeTheme = new Proxy({}, { get: () => () => "" }) as never;
+const fakeTheme = {
+  fg: (_c: string, s: string) => s,
+  bold: (s: string) => s,
+} as unknown as Theme;
 
 function makeDeps(overrides: Partial<MenuStateMachineDeps> = {}): MenuStateMachineDeps {
   const commits: Array<[string | undefined, string]> = [];
@@ -22,7 +28,6 @@ function makeDeps(overrides: Partial<MenuStateMachineDeps> = {}): MenuStateMachi
     resolveApiKey: async () => "k",
     resolveBaseUrl: () => "http://x",
     initialCurrentProvider: undefined,
-    theme: fakeTheme,
     onCommitPersist: (provider) => commits.push([provider, "persisted"]),
     onClose: () => {},
     ...overrides,
@@ -80,7 +85,7 @@ test("createMenuStateMachine: submenu component instance is cached across render
   await new Promise((r) => setTimeout(r, 10));
   assert.notEqual(sm.catalog(), undefined, "catalog must load after activation");
 
-  // Same instance across repeated getComponent calls proves the SettingsList
+  // Same instance across repeated getComponent calls proves the SelectList
   // (and its selectedIndex cursor) survives re-renders; a fresh instance would
   // reset the cursor to row 0 on every frame and make the submenu unusable.
   const first = sm.getComponent(tui, fakeTheme);

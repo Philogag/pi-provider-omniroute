@@ -1,7 +1,7 @@
 import { test, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import entry from "../src/index.ts";
-import { initTheme } from "@earendil-works/pi-coding-agent";
+import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 const registeredCommands: Record<string, (args: string, ctx: ExtensionCommandContext) => Promise<void> | void> = {};
@@ -44,7 +44,7 @@ test("/omniroute-settings in non-TUI mode notifies without opening UI", async ()
 });
 
 test("wrapped custom component re-resolves the state-machine component per render", async () => {
-  initTheme(); // the TUI path calls getSettingsListTheme(), which requires a theme
+  initTheme(); // the TUI path renders via the passed-in UI theme; initTheme must run first
   await entry(mockPi());
 
   // Point the catalog fetch at an unreachable loopback port so it refuses
@@ -70,7 +70,13 @@ test("wrapped custom component re-resolves the state-machine component per rende
   assert.ok(factory, "custom factory must be invoked in TUI mode with a resolvable key");
 
   const tui = { requestRender: () => { requestRenderCount++; } };
-  const wrapped = factory!(tui, undefined, undefined, (r) => { doneResult = r; }) as {
+  // The custom callback now uses the UI theme passed by the host (Task 2 theme
+  // channel switch); an identity stub keeps rendered text assertable.
+  const fakeTheme = {
+    fg: (_c: string, s: string) => s,
+    bold: (s: string) => s,
+  } as unknown as Theme;
+  const wrapped = factory!(tui, fakeTheme, undefined, (r) => { doneResult = r; }) as {
     render: (w: number) => string[];
     invalidate: () => void;
     handleInput: (data: string) => void;

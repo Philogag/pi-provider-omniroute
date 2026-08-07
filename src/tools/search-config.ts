@@ -1,9 +1,9 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
-import { Container, SettingsList, type Component, type SelectItem } from "@earendil-works/pi-tui";
+import { Container, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { TUI } from "@earendil-works/pi-tui";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, getSelectListTheme, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -146,42 +146,14 @@ export async function resolveSearchCatalog(
 export interface ProviderSubmenuParams {
   readonly currentProvider: string | undefined;
   readonly catalog: SearchCatalog;
-  readonly theme: ReturnType<typeof getSettingsListTheme>;
+  readonly theme: Theme;                       // UI theme (has .fg) — was SettingsListTheme
   readonly onCommit: (provider: string | undefined) => void;
   readonly onCancel: () => void;
+  readonly requestRender?: () => void;         // Pattern 1: repaint after input
 }
 
 const AUTO_ID = "auto";
 const AUTO_LABEL = "Auto (follow server default)";
-
-interface ProviderItem {
-  readonly id: string;
-  readonly label: string;
-  readonly currentValue: string;
-  readonly values: readonly string[];
-}
-
-function buildProviderItems(params: ProviderSubmenuParams): readonly ProviderItem[] {
-  const { currentProvider, catalog } = params;
-  const isCurrentAuto = currentProvider === undefined || currentProvider === "auto";
-  const autoItem: ProviderItem = {
-    id: AUTO_ID,
-    label: AUTO_LABEL,
-    currentValue: isCurrentAuto ? AUTO_ID : (currentProvider ?? "auto"),
-    // Invariant: currentValue must be a member of values, else SettingsList.activateItem
-    // (indexOf => -1) coerces the row to values[0] on the first Enter. When a concrete
-    // provider is active (static or catalog-only), keep it in the auto row's values so
-    // the row shows its actual current selection instead of snapping to AUTO_ID.
-    values: isCurrentAuto ? [AUTO_ID] : [currentProvider as string, AUTO_ID],
-  };
-  const providerItems: ProviderItem[] = catalog.providers.map((p) => ({
-    id: p.id,
-    label: p.name || p.id,
-    currentValue: p.id === currentProvider ? p.id : AUTO_ID,
-    values: [AUTO_ID, p.id],
-  }));
-  return [autoItem, ...providerItems];
-}
 
 export function buildSelectItems(params: ProviderSubmenuParams): readonly SelectItem[] {
   const { currentProvider, catalog } = params;
@@ -199,46 +171,36 @@ export function buildSelectItems(params: ProviderSubmenuParams): readonly Select
 }
 
 export function renderProviderSubmenu(params: ProviderSubmenuParams): Component {
-  const items = buildProviderItems(params);
-  const settingsTheme = params.theme;
-  let sl: SettingsList;
-
-  const onValueChange = (id: string, newValue: string): void => {
-    if (newValue === AUTO_ID || id === AUTO_ID) {
+  const items = buildSelectItems(params);
+  const { theme } = params;
+  const selectList = new SelectList([...items], Math.min(items.length, 15), getSelectListTheme());
+  selectList.onSelect = (item: SelectItem): void => {
+    if (item.value === AUTO_ID) {
       params.onCommit(undefined);
     } else {
-      params.onCommit(newValue);
+      params.onCommit(item.value);
     }
   };
-
-  sl = new SettingsList(
-    items as never,
-    Math.min(items.length, 15),
-    settingsTheme,
-    onValueChange,
-    params.onCancel,  // settings list treats this as "cancel/close" callback
-  );
+  selectList.onCancel = params.onCancel;
 
   const container = new Container();
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+  container.addChild(new Text(theme.fg("accent", theme.bold("Search Provider")), 1, 0));
   if (params.catalog.isFallback) {
-    // The hint is rendered above the SettingsList; we use a small component for the hint row.
-    const hint: Component = {
-      render: (_w: number) => ["OmniRoute search catalog unreachable, using built-in list", ""],
-      invalidate: () => {},
-      handleInput: () => {},
-    };
-    container.addChild(hint);
+    container.addChild(new Text(theme.fg("warning", "OmniRoute search catalog unreachable, using built-in list"), 1, 0));
   }
-  container.addChild(sl as unknown as Component);
+  container.addChild(selectList as unknown as Component);
+  container.addChild(new Text(theme.fg("dim", keyHint("tui.select.up", "navigate") + " · " + keyHint("tui.select.confirm", "select") + " · " + keyHint("tui.select.cancel", "back")), 1, 0));
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
-  // A bare Container does not forward input; route keypresses (e.g. Esc) to the
-  // SettingsList so its onCancel fires when rendered inside a TUI/Overlay.
+  // A bare Container does not forward input; route keypresses to the SelectList.
   (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
-    for (const child of container.children) child.handleInput?.(data);
+    selectList.handleInput(data);
+    params.requestRender?.();
   };
 
-  // Expose the SettingsList's onChange for unit tests (see test/search-config-submenu.test.ts).
-  (container as unknown as { _sl: { onChange: typeof onValueChange } })._sl = { onChange: onValueChange };
+  // Expose the SelectList for unit tests (see test/search-config-submenu.test.ts).
+  (container as unknown as { _sl: SelectList })._sl = selectList;
 
   return container as unknown as Component;
 }
@@ -247,7 +209,7 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
-  readonly theme: ReturnType<typeof getSettingsListTheme>;
+  readonly theme: Theme;
   readonly onActivateSearchProvider: () => void;
 }
 
@@ -382,13 +344,12 @@ export interface MenuStateMachineDeps {
   readonly resolveApiKey: () => Promise<string | undefined>;
   readonly resolveBaseUrl: () => string;
   readonly initialCurrentProvider: string | undefined;
-  readonly theme: ReturnType<typeof getSettingsListTheme>;
   readonly onCommitPersist: (provider: string | undefined) => void;
   readonly onClose: () => void;
 }
 
 export interface MenuStateMachine {
-  getComponent(tui: TUI, theme: ReturnType<typeof getSettingsListTheme>): Component;
+  getComponent(tui: TUI, theme: Theme): Component;
   onActivateSearchProvider(): void;
   onCommit(provider: string | undefined): void;
   onCancel(): void;
@@ -402,7 +363,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   let currentProvider = deps.initialCurrentProvider;
   let catalogValue: SearchCatalog | undefined = undefined;
   let pendingFetch: AbortController | undefined;
-  // Memoized submenu component (design §9.3): the SettingsList inside
+  // Memoized submenu component (design §9.3): the SelectList inside
   // renderProviderSubmenu keeps its cursor (selectedIndex) in instance state,
   // so we must return the SAME instance across renders/inputs while in sub
   // mode, or the cursor resets to row 0 on every frame and the submenu becomes
@@ -462,7 +423,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       catalogValue = undefined;
       deps.onClose();
     },
-    getComponent: (tui, theme) => {
+    getComponent: (tui: TUI, theme: Theme) => {
       if (mode === "top") {
         return renderTopLevelMenu({
           currentProvider,
@@ -499,6 +460,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         currentProvider,
         catalog: catalogValue,
         theme,
+        requestRender: () => tui.requestRender(),
         onCommit: (p) => {
           cachedSubmenu = undefined;
           pendingFetch?.abort();
