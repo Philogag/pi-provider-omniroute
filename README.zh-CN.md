@@ -123,6 +123,10 @@ pi --list-models | grep omniroute
 
 执行时各工具按 **显式入参 > 已配置 > 省略** 解析 provider——例如以上配置下，`omniroute_web_search` 未传 `provider` 时用 `tavily-search`，`omniroute_web_fetch` 未传时用 `jina-reader`。在菜单中选择 `auto` 可清除已存 provider，回退到服务端默认。
 
+### 成本遥测
+
+会话消息成本（显示在 Pi 的用量/成本统计中）反映 OmniRoute 的 `X-OmniRoute-Response-Cost` 头上报的真实美元金额（以 SSE 注释行形式随响应体流入）。缓存命中由 OmniRoute 按 $0 计费，显示为 `0`。完整遥测（模型、provider、tokens、缓存命中、延迟）会以 `omniroute-telemetry` 类型附加到每条消息的 `diagnostics`。
+
 ## 开发
 
 ```bash

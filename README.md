@@ -62,6 +62,10 @@ This opens an interactive TUI menu (top-level → provider submenu) with the cur
 
 At execution time each tool resolves its provider as **explicit param > configured default > omit** — e.g. with the config above, `omniroute_web_search` without a `provider` param uses `tavily-search`, and `omniroute_web_fetch` without one uses `jina-reader`. Pick `auto` in the menu to clear the stored provider and fall back to the server default.
 
+### Cost telemetry
+
+Session message costs (shown in Pi's usage/cost statistics) reflect the real USD amount reported by OmniRoute's `X-OmniRoute-Response-Cost` header (streamed as SSE comment lines in the response body). Cache hits are billed at $0 by OmniRoute and show as `0`. Full telemetry (model, provider, tokens, cache-hit, latency) is attached to each message's `diagnostics` under type `omniroute-telemetry`.
+
 ## Development
 
 ```bash
