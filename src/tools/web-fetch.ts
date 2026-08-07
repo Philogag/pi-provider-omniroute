@@ -114,7 +114,13 @@ export const webFetchTool = defineTool({
     }
     const baseUrl = resolveBaseUrl(ctx);
     const timeoutMs = params.timeoutMs ?? 30_000;
-    const res = await omnirouteRequest("/web/fetch", buildFetchBody(params), {
+    // Three-state merge (explicit param > configured reader > omitted), mirroring
+    // search.ts. The reader is injected by src/index.ts (currentFetchProvider,
+    // set via setFetchConfigReader). normalizeFetchProvider re-gates the config
+    // value at call time (undefined/"auto"/invalid -> omitted).
+    const effectiveProvider =
+      params.provider ?? normalizeFetchProvider(getFetchConfigProvider());
+    const res = await omnirouteRequest("/web/fetch", buildFetchBody({ ...params, provider: effectiveProvider }), {
       apiKey,
       baseUrl,
       signal,

@@ -6,12 +6,15 @@ import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
 import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
 import { resolveStoredBaseUrl } from "./auth-credentials.ts";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
-import { webFetchTool } from "./tools/web-fetch.ts";
+import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
 import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig } from "./tools/search-config.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
 
 let currentConfigProvider: string | undefined = undefined;
 setSearchConfigReader(() => currentConfigProvider);
+
+let currentFetchProvider: string | undefined = undefined;
+setFetchConfigReader(() => currentFetchProvider);
 
 type OmnirouteModel = Model<"openai-completions">;
 
@@ -115,6 +118,7 @@ export default async function (pi: ExtensionAPI) {
   pi.on?.("session_start", async () => {
     const cfg = readOmnirouteConfig();
     currentConfigProvider = cfg.search?.provider;
+    currentFetchProvider = normalizeFetchProvider(cfg.fetch?.provider);
   });
 
   // /omniroute-settings: two-level menu (top → Search provider submenu) rendered
@@ -123,7 +127,7 @@ export default async function (pi: ExtensionAPI) {
   // Optional call: the test double for lazy-fetch registers only provider + tool
   // (same reason `on` above is optional). Real hosts implement registerCommand.
   pi.registerCommand?.("omniroute-settings", {
-    description: "OmniRoute settings (search provider, etc.)",
+    description: "OmniRoute settings (search / web-fetch provider)",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (ctx.mode !== "tui") {
         ctx.ui.notify("/omniroute-settings requires TUI mode", "error");
@@ -139,14 +143,15 @@ export default async function (pi: ExtensionAPI) {
         resolveApiKey: () => resolveApiKey(ctx),
         resolveBaseUrl: () => resolveBaseUrl(ctx),
         initialCurrentProvider: currentConfigProvider,
-        // TODO(Task 4): thread the fetch provider through session_start read.
-        initialFetchProvider: undefined,
+        initialFetchProvider: currentFetchProvider,
         onCommitPersist: (provider) => {
           currentConfigProvider = provider;
           writeOmnirouteConfig(provider);
         },
-        // TODO(Task 4): persist fetch provider (writeOmnirouteConfig(provider, "fetch")).
-        onCommitFetchPersist: () => {},
+        onCommitFetchPersist: (provider) => {
+          currentFetchProvider = provider;
+          writeOmnirouteConfig(provider, "fetch");
+        },
         onClose: () => {},
       });
       await ctx.ui.custom((tui, theme, _kb, done) => {
