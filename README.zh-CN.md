@@ -1,5 +1,7 @@
 # pi-provider-omniroute
 
+> **English**: [README](README.md) · **简体中文**：[中文文档](README.zh-CN.md)
+
 > 为 [Pi Agent](https://pi.dev) 提供的 OmniRoute OpenAI 兼容 provider 扩展，内置网页搜索与抓取工具。
 
 `pi-provider-omniroute` 把 [OmniRoute](https://github.com/diegosouzapw/OmniRoute) 注册为 Pi Agent 的自定义模型供应商，并把 OmniRoute 自带的网页搜索与抓取端点封装为 Pi 原生 agent 工具。
@@ -8,17 +10,20 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
 
 ## 功能特性
 
-- **OpenAI 兼容 chat provider** —— 在 `omniroute` provider 名下注册 OmniRoute，支持流式 chat completions 与 tool calling。
-- **自动导入模型** —— 启动时调用 `GET /v1/models`，把每个被路由的模型（如 `openai/gpt-4o`）注册为 Pi 模型。
-- **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。
-- **`omniroute_web_search` 工具** —— 封装 `POST /v1/search`，支持 14 个搜索引擎、2 种搜索类型、7 个时间范围、国家/语言过滤与可选的全文抽取。
-- **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
-- **交互式登录** —— `/login` 时依次提示输入 API key 与 base URL，URL 非法可重试一次，默认值 `http://localhost:20128/v1`。
-- **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
-- **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，当前启用项行首标 `✓`。
-- **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider`），每次会话启动自动加载。
-- **可配置默认 provider** —— 两个工具执行时按"显式入参 > 已配置 > 省略"合并 `provider` 字段，在 `/omniroute-settings` 固定默认值，无需改变模型的调用方式。
-- **TypeBox 校验入参** —— 工具入参由 Pi 做静态校验。
+- **Provider**
+  - **OpenAI 兼容 chat provider** —— 在 `omniroute` provider 名下注册 OmniRoute，支持流式 chat completions 与 tool calling。
+  - **交互式登录** —— `/login` 时依次提示输入 API key 与 base URL，URL 非法可重试一次，默认值 `http://localhost:20128/v1`。
+  - **自动导入模型** —— 启动时调用 `GET /v1/models`，把每个被路由的模型（如 `openai/gpt-4o`）注册为 Pi 模型。
+  - **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。
+  - **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
+- **Settings**
+  - **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，当前启用项行首标 `✓`。
+  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider`），每次会话启动自动加载。
+- **Tool**
+  - **`omniroute_web_search` 工具** —— 封装 `POST /v1/search`，支持 14 个搜索引擎、2 种搜索类型、7 个时间范围、国家/语言过滤与可选的全文抽取。
+  - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
+  - **可配置默认 provider** —— 两个工具执行时按"显式入参 > 已配置 > 省略"合并 `provider` 字段，在 `/omniroute-settings` 固定默认值，无需改变模型的调用方式。
+  - **TypeBox 校验入参** —— 工具入参由 Pi 做静态校验。
 
 ## 环境要求
 

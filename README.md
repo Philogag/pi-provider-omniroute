@@ -1,5 +1,7 @@
 # pi-provider-omniroute
 
+> **简体中文**：[中文文档](README.zh-CN.md) · **English**：[README](README.md)
+
 > Play on [Pi Agent](https://pi.dev) with [OmniRoute](https://github.com/diegosouzapw/OmniRoute) easily.
 
 `pi-provider-omniroute` is a extention for Pi-Agent.  
