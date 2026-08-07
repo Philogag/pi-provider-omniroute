@@ -14,8 +14,10 @@ const fakeTheme = {
 function makeParams(overrides: Partial<TopLevelMenuParams> = {}): TopLevelMenuParams {
   return {
     currentProvider: "tavily-search",
+    fetchPreview: "Auto",
     theme: fakeTheme,
     onActivateSearchProvider: () => {},
+    onActivateFetchProvider: () => {},
     ...overrides,
   };
 }
@@ -43,6 +45,25 @@ test("renderTopLevelMenu: Enter triggers onActivateSearchProvider", () => {
   const component = renderTopLevelMenu(params) as unknown as { handleInput: (data: string) => void };
   component.handleInput("\r");
   assert.equal(activated, true);
+});
+
+test("renderTopLevelMenu: renders both rows with previews", () => {
+  const params = makeParams({ currentProvider: "tavily-search", fetchPreview: "firecrawl" });
+  const component = renderTopLevelMenu(params) as unknown as { render: (w: number) => string[] };
+  const joined = component.render(80).join("\n");
+  assert.match(joined, /Search provider:\s+tavily-search/i);
+  assert.match(joined, /Web Fetch provider:\s+firecrawl/i);
+});
+
+test("renderTopLevelMenu: Enter on fetch row activates fetch provider", () => {
+  let activated = "";
+  const params = makeParams({
+    onActivateSearchProvider: () => { activated = "search"; },
+    onActivateFetchProvider: () => { activated = "fetch"; },
+  });
+  const component = renderTopLevelMenu(params) as unknown as { _sl: { onSelect?: (item: { value: string; label: string }) => void } };
+  component._sl.onSelect?.({ value: "fetch", label: "Web Fetch provider: Auto" });
+  assert.equal(activated, "fetch");
 });
 
 test("renderTopLevelMenu: Esc does not trigger activation, invokes onClose", () => {

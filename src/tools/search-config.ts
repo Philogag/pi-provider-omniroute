@@ -225,10 +225,12 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
-  readonly theme: Theme;                       // UI theme — was SettingsListTheme
+  readonly fetchPreview: string;                     // "Auto" or provider id
+  readonly theme: Theme;                             // UI theme — was SettingsListTheme
   readonly onActivateSearchProvider: () => void;
-  readonly onClose?: () => void;               // Esc at top closes the overlay
-  readonly requestRender?: () => void;         // Pattern 1: repaint after input
+  readonly onActivateFetchProvider: () => void;
+  readonly onClose?: () => void;                     // Esc at top closes the overlay
+  readonly requestRender?: () => void;               // Pattern 1: repaint after input
 }
 
 function previewForProvider(p: string | undefined): string {
@@ -237,11 +239,20 @@ function previewForProvider(p: string | undefined): string {
 }
 
 export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
-  const { currentProvider, theme, onActivateSearchProvider } = params;
+  const { currentProvider, fetchPreview, theme } = params;
   const preview = previewForProvider(currentProvider);
-  const items: SelectItem[] = [{ value: "provider", label: `Search provider: ${preview}` }];
-  const selectList = new SelectList(items, 1, getSelectListTheme());
-  selectList.onSelect = () => onActivateSearchProvider();
+  const items: SelectItem[] = [
+    { value: "search", label: `Search provider: ${preview}` },
+    { value: "fetch", label: `Web Fetch provider: ${fetchPreview}` },
+  ];
+  const selectList = new SelectList(items, items.length, getSelectListTheme());
+  selectList.onSelect = (item: SelectItem): void => {
+    if (item.value === "fetch") {
+      params.onActivateFetchProvider();
+    } else {
+      params.onActivateSearchProvider();
+    }
+  };
   selectList.onCancel = () => params.onClose?.();
 
   const container = new Container();
@@ -255,6 +266,10 @@ export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
     selectList.handleInput(data);
     params.requestRender?.();
   };
+
+  // Expose the SelectList for unit tests (see test/search-config-toplevel.test.ts).
+  (container as unknown as { _sl: SelectList })._sl = selectList;
+
   return container as unknown as Component;
 }
 
@@ -348,11 +363,38 @@ export function writeOmnirouteConfig(provider: string | undefined, key: "search"
   }
 }
 
-// --- Fetch provider submenu (stub) ---
+// --- Fetch provider submenu ---
 
-// Temporarily minimal — full official Pattern 1 implementation in Task 3.
-export function renderFetchSubmenu(_params: FetchSubmenuParams): Component {
-  return new Container() as unknown as Component;
+export function renderFetchSubmenu(params: FetchSubmenuParams): Component {
+  const items = buildFetchSelectItems(params.currentFetchProvider);
+  const { theme } = params;
+  const selectList = new SelectList([...items], Math.min(items.length, 15), getSelectListTheme());
+  selectList.onSelect = (item: SelectItem): void => {
+    if (item.value === AUTO_ID) {
+      params.onCommit(undefined);
+    } else {
+      params.onCommit(item.value);
+    }
+  };
+  selectList.onCancel = params.onCancel;
+
+  const container = new Container();
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+  container.addChild(new Text(theme.fg("accent", theme.bold("Web Fetch Provider")), 1, 0));
+  container.addChild(selectList as unknown as Component);
+  container.addChild(new Text(theme.fg("dim", keyHint("tui.select.up", "navigate") + " · " + keyHint("tui.select.confirm", "select") + " · " + keyHint("tui.select.cancel", "back")), 1, 0));
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+  // A bare Container does not forward input; route keypresses to the SelectList.
+  (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+    selectList.handleInput(data);
+    params.requestRender?.();
+  };
+
+  // Expose the SelectList for unit tests.
+  (container as unknown as { _sl: SelectList })._sl = selectList;
+
+  return container as unknown as Component;
 }
 
 export interface FetchSubmenuParams {
@@ -472,6 +514,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       if (mode === "top") {
         return renderTopLevelMenu({
           currentProvider,
+          fetchPreview: previewForProvider(currentFetchProvider),
           theme,
           onActivateSearchProvider: () => {
             mode = "sub-search";
@@ -479,8 +522,14 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
             tui.requestRender();
             void fetchCatalogAsync(tui);
           },
+          onActivateFetchProvider: () => {
+            mode = "sub-fetch";
+            cachedFetchSubmenu = undefined;
+            tui.requestRender();
+          },
           onClose: () => {
             cachedSubmenu = undefined;
+            cachedFetchSubmenu = undefined;
             pendingFetch?.abort();
             mode = "top";
             deps.onClose();
