@@ -147,7 +147,7 @@ export async function resolveSearchCatalog(
 export interface ProviderSubmenuParams {
   readonly currentProvider: string | undefined;
   readonly catalog: SearchCatalog;
-  readonly theme: Theme;                       // UI theme (has .fg) — was SettingsListTheme
+  readonly theme: Theme;                       // UI theme (has .fg)
   readonly onCommit: (provider: string | undefined) => void;
   readonly onCancel: () => void;
   readonly requestRender?: () => void;         // Pattern 1: repaint after input
@@ -226,7 +226,7 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
   readonly fetchPreview: string;                     // "Auto" or provider id
-  readonly theme: Theme;                             // UI theme — was SettingsListTheme
+  readonly theme: Theme;                             // UI theme
   readonly onActivateSearchProvider: () => void;
   readonly onActivateFetchProvider: () => void;
   readonly onClose?: () => void;                     // Esc at top closes the overlay
