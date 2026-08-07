@@ -9,6 +9,8 @@ import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
 import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig } from "./tools/search-config.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
+import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
+import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
 
 let currentConfigProvider: string | undefined = undefined;
 setSearchConfigReader(() => currentConfigProvider);
@@ -94,12 +96,26 @@ export default async function (pi: ExtensionAPI) {
       model: OmnirouteModel,
       context: Context,
       options?: StreamOptions,
-    ) => stream(model, context, options as never),
+    ) => {
+      let telemetry: OmnirouteTelemetry | undefined = undefined;
+      const captured = withOmnirouteFetch(fetch, (t) => { telemetry = t; });
+      return wrapStreamWithCost(
+        stream(model, context, { ...options, fetch: captured } as never),
+        () => telemetry,
+      );
+    },
     streamSimple: (
       model: OmnirouteModel,
       context: Context,
       options?: SimpleStreamOptions,
-    ) => streamSimple(model, context, options),
+    ) => {
+      let telemetry: OmnirouteTelemetry | undefined = undefined;
+      const captured = withOmnirouteFetch(fetch, (t) => { telemetry = t; });
+      return wrapStreamWithCost(
+        streamSimple(model, context, { ...options, fetch: captured }),
+        () => telemetry,
+      );
+    },
   };
 
   pi.registerProvider(provider);
