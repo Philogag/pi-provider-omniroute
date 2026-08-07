@@ -1,7 +1,7 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
-import { Container, SettingsList, type Component } from "@earendil-works/pi-tui";
+import { Container, SettingsList, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { TUI } from "@earendil-works/pi-tui";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
@@ -179,6 +179,21 @@ function buildProviderItems(params: ProviderSubmenuParams): readonly ProviderIte
     label: p.name || p.id,
     currentValue: p.id === currentProvider ? p.id : AUTO_ID,
     values: [AUTO_ID, p.id],
+  }));
+  return [autoItem, ...providerItems];
+}
+
+export function buildSelectItems(params: ProviderSubmenuParams): readonly SelectItem[] {
+  const { currentProvider, catalog } = params;
+  const isCurrentAuto = currentProvider === undefined || currentProvider === "auto";
+  const check = (active: boolean): string => (active ? "✓ " : "");
+  const autoItem: SelectItem = {
+    value: AUTO_ID,
+    label: `${check(isCurrentAuto)}${AUTO_LABEL}`,
+  };
+  const providerItems: SelectItem[] = catalog.providers.map((p) => ({
+    value: p.id,
+    label: `${check(p.id === currentProvider)}${p.name || p.id}`,
   }));
   return [autoItem, ...providerItems];
 }
