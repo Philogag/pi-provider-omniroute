@@ -77,10 +77,22 @@ export interface TelemetryTransform {
 }
 
 /** Byte-transparent TransformStream that also parses OmniRoute telemetry lines. */
-export function createTelemetryTransformStream(): TelemetryTransform {
+export function createTelemetryTransformStream(
+  onTelemetry?: (t: OmnirouteTelemetry) => void,
+): TelemetryTransform {
   let buffer = "";
   let telemetry: OmnirouteTelemetry | undefined;
   const decoder = new TextDecoder();
+  const update = (parsed: Partial<OmnirouteTelemetry>) => {
+    telemetry = { ...(telemetry ?? {}), ...parsed };
+    // Report eagerly (telemetry lines precede `data: [DONE]`, so the consumer
+    // sees the final value before the done event) rather than only after the
+    // body has fully drained — avoids a race where done is processed before
+    // the pipe resolves. Idempotent for callers that just store the value.
+    if (onTelemetry && telemetry && Object.keys(telemetry).length > 0) {
+      onTelemetry(telemetry);
+    }
+  };
   const transform = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       controller.enqueue(chunk); // pass bytes through untouched
@@ -91,13 +103,13 @@ export function createTelemetryTransformStream(): TelemetryTransform {
         const line = buffer.slice(0, idx).replace(/\r$/, ""); // tolerate CRLF
         buffer = buffer.slice(idx + 1);
         const parsed = parseOmnirouteTelemetryLine(line);
-        if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
+        if (parsed) update(parsed);
       }
     },
     flush() {
       // writable closed → readable ends naturally; nothing to terminate.
       const parsed = parseOmnirouteTelemetryLine(buffer.replace(/\r$/, "")); // tolerate CRLF without trailing newline
-      if (parsed) telemetry = { ...(telemetry ?? {}), ...parsed };
+      if (parsed) update(parsed);
       buffer = "";
     },
   });
@@ -115,13 +127,15 @@ export function withOmnirouteFetch(
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     const res = await fetchImpl(input, init);
     if (!res.ok || !res.body) return res;
-    const { stream, getTelemetry } = createTelemetryTransformStream();
+    const { stream, getTelemetry } = createTelemetryTransformStream((t) => onTelemetry?.(t));
     const pipe = res.body.pipeTo(stream.writable);
     // Read the transformed stream; report telemetry once the body is fully consumed.
     const consumed = (async () => {
       await pipe;
+      // Idempotent fallback: the eager per-line callback above already reported
+      // the final value; this re-reports only if the flush path found something.
       const t = getTelemetry();
-      if (t) onTelemetry?.(t);
+      if (t && Object.keys(t).length > 0) onTelemetry?.(t);
     })();
     // Note: rejections from `pipe` (e.g. body aborted mid-stream) are caught here —
     // telemetry stays best-effort and the caller's response stream is unaffected.
