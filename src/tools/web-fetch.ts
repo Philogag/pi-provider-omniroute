@@ -7,6 +7,18 @@ import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
 export const FETCH_PROVIDERS = ["firecrawl", "jina-reader", "tavily-search", "tinyfish"] as const;
 export const FETCH_FORMATS = ["markdown", "html", "links", "screenshot"] as const;
 
+export function normalizeFetchProvider(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  return (FETCH_PROVIDERS as readonly string[]).includes(raw) ? raw : undefined;
+}
+
+// --- Fetch provider config reader (injected by src/index.ts; same pattern as search.ts) ---
+let getFetchConfigProvider: () => string | undefined = () => undefined;
+
+export function setFetchConfigReader(fn: () => string | undefined): void {
+  getFetchConfigProvider = fn;
+}
+
 function stringEnum<T extends readonly string[]>(values: T) {
   return Type.Union(values.map((v) => Type.Literal(v)));
 }

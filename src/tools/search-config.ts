@@ -7,6 +7,7 @@ import { DynamicBorder, getSelectListTheme, keyHint, type Theme } from "@earendi
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { FETCH_PROVIDERS, normalizeFetchProvider } from "./web-fetch.ts";
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -170,6 +171,21 @@ export function buildSelectItems(params: ProviderSubmenuParams): readonly Select
   return [autoItem, ...providerItems];
 }
 
+export function buildFetchSelectItems(currentFetchProvider: string | undefined): readonly SelectItem[] {
+  const normalized = normalizeFetchProvider(currentFetchProvider);
+  const check = (active: boolean): string => (active ? "✓ " : "");
+  const isCurrentAuto = normalized === undefined;
+  const autoItem: SelectItem = {
+    value: AUTO_ID,
+    label: `${check(isCurrentAuto)}${AUTO_LABEL}`,
+  };
+  const providerItems: SelectItem[] = FETCH_PROVIDERS.map((id) => ({
+    value: id,
+    label: `${check(id === normalized)}${id}`,
+  }));
+  return [autoItem, ...providerItems];
+}
+
 export function renderProviderSubmenu(params: ProviderSubmenuParams): Component {
   const items = buildSelectItems(params);
   const { theme } = params;
@@ -250,7 +266,12 @@ export function resolveOmnirouteConfigPath(): string {
   return join(base, "omniroute.json");
 }
 
-export function readOmnirouteConfig(): { readonly provider?: string } {
+export interface OmnirouteConfigShape {
+  readonly search?: { readonly provider?: string };
+  readonly fetch?: { readonly provider?: string };
+}
+
+export function readOmnirouteConfig(): OmnirouteConfigShape {
   const path = resolveOmnirouteConfigPath();
   let raw: string;
   try {
@@ -272,20 +293,25 @@ export function readOmnirouteConfig(): { readonly provider?: string } {
     return {};
   }
   const root = parsed as Record<string, unknown>;
-  const search = root["search"];
-  if (!search || typeof search !== "object" || Array.isArray(search)) {
-    console.warn(`[omniroute] ${path} \`search\` field is not a plain object; treating as empty config`);
-    return {};
+  const result: { search?: { provider: string }; fetch?: { provider: string } } = {};
+  for (const key of ["search", "fetch"] as const) {
+    const branch = root[key];
+    if (branch === undefined) continue;
+    if (!branch || typeof branch !== "object" || Array.isArray(branch)) {
+      console.warn(`[omniroute] ${path} \`${key}\` field is not a plain object; treating as empty config`);
+      continue;
+    }
+    const provider = (branch as Record<string, unknown>)["provider"];
+    if (typeof provider !== "string") {
+      console.warn(`[omniroute] ${path} \`${key}.provider\` is not a string; treating as empty config`);
+      continue;
+    }
+    result[key] = { provider };
   }
-  const provider = (search as Record<string, unknown>)["provider"];
-  if (typeof provider !== "string") {
-    console.warn(`[omniroute] ${path} \`search.provider\` is not a string; treating as empty config`);
-    return {};
-  }
-  return { provider };
+  return result;
 }
 
-export function writeOmnirouteConfig(provider: string | undefined): void {
+export function writeOmnirouteConfig(provider: string | undefined, key: "search" | "fetch" = "search"): void {
   const path = resolveOmnirouteConfigPath();
   const tmp = path + ".tmp";
   // Read current (preserve unknown keys)
@@ -304,12 +330,12 @@ export function writeOmnirouteConfig(provider: string | undefined): void {
   }
 
   if (provider === undefined) {
-    delete root["search"];
+    delete root[key];
   } else {
-    if (!root["search"] || typeof root["search"] !== "object" || Array.isArray(root["search"])) {
-      root["search"] = {};
+    if (!root[key] || typeof root[key] !== "object" || Array.isArray(root[key])) {
+      root[key] = {};
     }
-    (root["search"] as Record<string, unknown>)["provider"] = provider;
+    (root[key] as Record<string, unknown>)["provider"] = provider;
   }
 
   try {

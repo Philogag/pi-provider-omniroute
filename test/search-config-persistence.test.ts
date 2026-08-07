@@ -37,7 +37,7 @@ test("writeOmnirouteConfig: creates file when absent", () => {
 
 test("writeOmnirouteConfig: round-trips through read", () => {
   writeOmnirouteConfig("brave-search");
-  assert.deepEqual(readOmnirouteConfig(), { provider: "brave-search" });
+  assert.deepEqual(readOmnirouteConfig(), { search: { provider: "brave-search" } });
 });
 
 test("writeOmnirouteConfig(undefined) removes search key", () => {
@@ -125,6 +125,43 @@ test("readOmnirouteConfig: non-string provider warns exactly once", () => {
     console.warn = origWarn;
   }
   assert.equal(warns, 1, "expected exactly one console.warn for non-string provider");
+});
+
+test("writeOmnirouteConfig(key='fetch') writes fetch branch and preserves search", () => {
+  writeOmnirouteConfig("tavily-search");
+  writeOmnirouteConfig("firecrawl", "fetch");
+  const out = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
+  assert.deepEqual(out, { search: { provider: "tavily-search" }, fetch: { provider: "firecrawl" } });
+});
+
+test("writeOmnirouteConfig(undefined, 'fetch') removes fetch key only", () => {
+  writeOmnirouteConfig("tavily-search");
+  writeOmnirouteConfig("firecrawl", "fetch");
+  writeOmnirouteConfig(undefined, "fetch");
+  const out = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
+  assert.deepEqual(out, { search: { provider: "tavily-search" } });
+});
+
+test("readOmnirouteConfig: reads both branches independently", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ search: { provider: "tavily-search" }, fetch: { provider: "firecrawl" } }));
+  assert.deepEqual(readOmnirouteConfig(), { search: { provider: "tavily-search" }, fetch: { provider: "firecrawl" } });
+});
+
+test("readOmnirouteConfig: non-object fetch warns once but search is still read", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ search: { provider: "tavily-search" }, fetch: 42 }));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  let cfg: unknown;
+  try {
+    cfg = readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "exactly one warn for non-object fetch");
+  assert.deepEqual(cfg, { search: { provider: "tavily-search" } });
 });
 
 test("writeOmnirouteConfig: write failure (read-only dir) warns but does not throw", () => {

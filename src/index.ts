@@ -114,7 +114,7 @@ export default async function (pi: ExtensionAPI) {
   // existing use-models-metadata mock which only registers provider + tool).
   pi.on?.("session_start", async () => {
     const cfg = readOmnirouteConfig();
-    currentConfigProvider = cfg.provider;
+    currentConfigProvider = cfg.search?.provider;
   });
 
   // /omniroute-settings: two-level menu (top → Search provider submenu) rendered
