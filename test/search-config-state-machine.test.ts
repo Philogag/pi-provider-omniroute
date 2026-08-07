@@ -164,3 +164,33 @@ test("createMenuStateMachine: requestRender is called after the catalog fetch re
   assert.notEqual(sm.catalog(), undefined, "catalog must load once the fetch resolves");
   assert.ok(renders > rendersAfterActivate, "requestRender must fire after the catalog fetch resolves");
 });
+
+test("C1 regression: top menu cursor survives wrapper frame re-creation (Down then Enter activates fetch)", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  // Simulate the command wrapper in src/index.ts: every frame and every input
+  // re-resolves sm.getComponent(tui, theme). Without top-level memoization the
+  // SelectList cursor resets to row 0 each frame and the fetch row is unreachable.
+  const frame = () =>
+    sm.getComponent(tui, fakeTheme) as unknown as { handleInput: (data: string) => void };
+  frame();                                  // initial render: cursor on row 0 (Search provider)
+  frame().handleInput("\x1b[B");            // Down: cursor -> row 1 (Web Fetch provider)
+  const afterDown = frame();                // re-render (fresh getComponent call)
+  afterDown.handleInput("\r");              // Enter on the still-selected fetch row
+  assert.equal(sm.mode(), "sub-fetch", "Down+Enter across wrapper frames must activate the fetch row");
+  // And the same-instance guarantee the caching relies on:
+  assert.equal(sm.getComponent(tui, fakeTheme), sm.getComponent(tui, fakeTheme),
+    "top-level component must be the same cached instance across frames");
+});
+
+test("C1 regression: top-level cache is invalidated on mode transitions (preview/cursor refresh)", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  const first = sm.getComponent(tui, fakeTheme);
+  sm.onActivateFetchProvider();
+  assert.equal(sm.mode(), "sub-fetch");
+  sm.onCancel();
+  assert.equal(sm.mode(), "top");
+  const second = sm.getComponent(tui, fakeTheme);
+  assert.notEqual(second, first, "top-level component must be recreated after leaving and returning to top");
+});

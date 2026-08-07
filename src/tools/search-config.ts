@@ -444,6 +444,13 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   // keyboard-unusable. Invalidated on every top<->sub transition and reset.
   let cachedSubmenu: Component | undefined = undefined;
   let cachedFetchSubmenu: Component | undefined = undefined;
+  // Memoized top-level component (same rationale as the submenu caches): the
+  // SelectList inside renderTopLevelMenu keeps its cursor (selectedIndex) in
+  // instance state, so we must return the SAME instance across renders/inputs
+  // while in top mode, or the cursor resets to row 0 on every frame and the
+  // two-row menu becomes keyboard-unusable (the "Web Fetch provider" row would
+  // be unreachable). Invalidated on every mode transition / close.
+  let cachedTopLevel: Component | undefined = undefined;
 
   const fetchCatalogAsync = async (tui: TUI): Promise<void> => {
     const controller = new AbortController();
@@ -474,15 +481,18 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
     onActivateSearchProvider: () => {
       mode = "sub-search";
       catalogValue = undefined;
+      cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       // Caller must call fetchCatalogAsync separately (to pass ctx); see command wiring in Task 9.
     },
     onActivateFetchProvider: () => {
       mode = "sub-fetch";
+      cachedTopLevel = undefined;
       cachedFetchSubmenu = undefined;
     },
     onCommit: (provider) => {
       pendingFetch?.abort();
+      cachedTopLevel = undefined;
       if (mode === "sub-fetch") {
         cachedFetchSubmenu = undefined;
         currentFetchProvider = provider;
@@ -496,6 +506,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       catalogValue = undefined;
     },
     onCancel: () => {
+      cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
       pendingFetch?.abort();
@@ -503,6 +514,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       catalogValue = undefined;
     },
     onEsc: () => {
+      cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
       pendingFetch?.abort();
@@ -512,22 +524,26 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
     },
     getComponent: (tui: TUI, theme: Theme) => {
       if (mode === "top") {
-        return renderTopLevelMenu({
+        if (cachedTopLevel) return cachedTopLevel;
+        cachedTopLevel = renderTopLevelMenu({
           currentProvider,
           fetchPreview: previewForProvider(currentFetchProvider),
           theme,
           onActivateSearchProvider: () => {
             mode = "sub-search";
+            cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             tui.requestRender();
             void fetchCatalogAsync(tui);
           },
           onActivateFetchProvider: () => {
             mode = "sub-fetch";
+            cachedTopLevel = undefined;
             cachedFetchSubmenu = undefined;
             tui.requestRender();
           },
           onClose: () => {
+            cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             cachedFetchSubmenu = undefined;
             pendingFetch?.abort();
@@ -536,6 +552,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           },
           requestRender: () => tui.requestRender(),
         });
+        return cachedTopLevel;
       }
       if (mode === "sub-search") {
         // …existing loading/catalog/cachedSubmenu logic unchanged…
@@ -555,6 +572,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
           (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
             if (data === "\x1b") {
+              cachedTopLevel = undefined;
               cachedSubmenu = undefined;
               pendingFetch?.abort();
               mode = "top";
@@ -570,6 +588,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           theme,
           requestRender: () => tui.requestRender(),
           onCommit: (p) => {
+            cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             pendingFetch?.abort();
             currentProvider = p;
@@ -579,6 +598,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
             tui.requestRender();
           },
           onCancel: () => {
+            cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             pendingFetch?.abort();
             mode = "top";
@@ -595,6 +615,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         theme,
         requestRender: () => tui.requestRender(),
         onCommit: (p) => {
+          cachedTopLevel = undefined;
           cachedFetchSubmenu = undefined;
           currentFetchProvider = p;
           deps.onCommitFetchPersist(p);
@@ -602,6 +623,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           tui.requestRender();
         },
         onCancel: () => {
+          cachedTopLevel = undefined;
           cachedFetchSubmenu = undefined;
           mode = "top";
           tui.requestRender();
