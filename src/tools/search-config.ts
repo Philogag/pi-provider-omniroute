@@ -209,8 +209,10 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
-  readonly theme: Theme;
+  readonly theme: Theme;                       // UI theme — was SettingsListTheme
   readonly onActivateSearchProvider: () => void;
+  readonly onClose?: () => void;               // Esc at top closes the overlay
+  readonly requestRender?: () => void;         // Pattern 1: repaint after input
 }
 
 function previewForProvider(p: string | undefined): string {
@@ -219,39 +221,24 @@ function previewForProvider(p: string | undefined): string {
 }
 
 export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
-  const { currentProvider, theme: _theme, onActivateSearchProvider } = params;
+  const { currentProvider, theme, onActivateSearchProvider } = params;
   const preview = previewForProvider(currentProvider);
+  const items: SelectItem[] = [{ value: "provider", label: `Search provider: ${preview}` }];
+  const selectList = new SelectList(items, 1, getSelectListTheme());
+  selectList.onSelect = () => onActivateSearchProvider();
+  selectList.onCancel = () => params.onClose?.();
 
-  const row: Component = {
-    render: (_w: number) => [`  ▶ Search provider: ${preview}`],
-    invalidate: () => {},
-    handleInput: (data: string) => {
-      if (data === "\r" || data === "\n") {
-        onActivateSearchProvider();
-      }
-    },
-  };
-  const hint: Component = {
-    render: (_w: number) => ["", "  ↑/↓ or j/k: navigate · Enter: activate · Esc: close"],
-    invalidate: () => {},
-    handleInput: () => {},
-  };
-  const header: Component = {
-    render: (_w: number) => ["OmniRoute Settings", ""],
-    invalidate: () => {},
-    handleInput: () => {},
-  };
   const container = new Container();
-  container.addChild(header);
-  container.addChild(row);
-  container.addChild(hint);
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+  container.addChild(new Text(theme.fg("accent", theme.bold("OmniRoute Settings")), 1, 0));
+  container.addChild(selectList as unknown as Component);
+  container.addChild(new Text(theme.fg("dim", keyHint("tui.select.confirm", "activate") + " · " + keyHint("tui.select.cancel", "close")), 1, 0));
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
-  // A bare Container does not forward input; route keypresses (e.g. Enter) to the
-  // children so the row's handleInput fires when rendered inside a TUI/Overlay.
   (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
-    for (const child of container.children) child.handleInput?.(data);
+    selectList.handleInput(data);
+    params.requestRender?.();
   };
-
   return container as unknown as Component;
 }
 
@@ -430,13 +417,17 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           theme,
           onActivateSearchProvider: () => {
             mode = "sub";
-            // A fresh submenu (and catalog) is needed for the new sub session.
             cachedSubmenu = undefined;
             tui.requestRender();
-            // Resolvers are bound closures (injecting the command ctx), so the
-            // fetch already has everything it needs.
             void fetchCatalogAsync(tui);
           },
+          onClose: () => {
+            cachedSubmenu = undefined;
+            pendingFetch?.abort();
+            mode = "top";
+            deps.onClose();
+          },
+          requestRender: () => tui.requestRender(),
         });
       }
       // mode === "sub"
