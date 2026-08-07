@@ -139,10 +139,14 @@ export default async function (pi: ExtensionAPI) {
         resolveApiKey: () => resolveApiKey(ctx),
         resolveBaseUrl: () => resolveBaseUrl(ctx),
         initialCurrentProvider: currentConfigProvider,
+        // TODO(Task 4): thread the fetch provider through session_start read.
+        initialFetchProvider: undefined,
         onCommitPersist: (provider) => {
           currentConfigProvider = provider;
           writeOmnirouteConfig(provider);
         },
+        // TODO(Task 4): persist fetch provider (writeOmnirouteConfig(provider, "fetch")).
+        onCommitFetchPersist: () => {},
         onClose: () => {},
       });
       await ctx.ui.custom((tui, theme, _kb, done) => {

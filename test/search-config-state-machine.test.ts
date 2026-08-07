@@ -28,7 +28,9 @@ function makeDeps(overrides: Partial<MenuStateMachineDeps> = {}): MenuStateMachi
     resolveApiKey: async () => "k",
     resolveBaseUrl: () => "http://x",
     initialCurrentProvider: undefined,
+    initialFetchProvider: undefined,
     onCommitPersist: (provider) => commits.push([provider, "persisted"]),
+    onCommitFetchPersist: () => {},
     onClose: () => {},
     ...overrides,
   };
@@ -40,13 +42,13 @@ test("createMenuStateMachine: starts in top mode", () => {
   assert.equal(sm.catalog(), undefined);
 });
 
-test("createMenuStateMachine: onActivateSearchProvider switches to sub mode (loading first)", () => {
+test("createMenuStateMachine: onActivateSearchProvider switches to sub-search mode (loading first)", () => {
   globalThis.fetch = mock.method(globalThis, "fetch", async () => jsonResponse(200, {
     data: [{ id: "tavily-search", name: "Tavily", search_types: ["web"] }],
   })) as never;
   const sm = createMenuStateMachine(makeDeps());
   sm.onActivateSearchProvider();
-  assert.equal(sm.mode(), "sub");
+  assert.equal(sm.mode(), "sub-search");
   // catalog is undefined until the async fetch resolves
   assert.equal(sm.catalog(), undefined);
 });
@@ -100,6 +102,45 @@ test("createMenuStateMachine: submenu component instance is cached across render
   await new Promise((r) => setTimeout(r, 10));
   const third = sm.getComponent(tui, fakeTheme);
   assert.notEqual(third, first, "submenu must be recreated after commit + re-activation");
+});
+
+test("createMenuStateMachine: onActivateFetchProvider switches to sub-fetch mode", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  sm.onActivateFetchProvider();
+  assert.equal(sm.mode(), "sub-fetch");
+  assert.equal(sm.catalog(), undefined);
+});
+
+test("createMenuStateMachine: fetch commit calls onCommitFetchPersist and returns to top", () => {
+  const persisted: Array<string | undefined> = [];
+  const sm = createMenuStateMachine(makeDeps({ onCommitFetchPersist: (p) => persisted.push(p) }));
+  sm.onActivateFetchProvider();
+  sm.onCommit("firecrawl");
+  assert.deepEqual(persisted, ["firecrawl"]);
+  assert.equal(sm.mode(), "top");
+});
+
+test("createMenuStateMachine: fetch cancel returns to top without persisting", () => {
+  let persisted = false;
+  const sm = createMenuStateMachine(makeDeps({ onCommitFetchPersist: () => { persisted = true; } }));
+  sm.onActivateFetchProvider();
+  sm.onCancel();
+  assert.equal(sm.mode(), "top");
+  assert.equal(persisted, false);
+});
+
+test("createMenuStateMachine: fetch submenu instance is cached across renders and recreated after reset", () => {
+  const sm = createMenuStateMachine(makeDeps({ initialFetchProvider: "firecrawl" }));
+  const tui = makeTui();
+  sm.onActivateFetchProvider();
+  const first = sm.getComponent(tui, fakeTheme);
+  const second = sm.getComponent(tui, fakeTheme);
+  assert.equal(first, second, "fetch submenu must be the same cached instance across renders");
+  sm.onCommit("jina-reader");
+  assert.equal(sm.mode(), "top");
+  sm.onActivateFetchProvider();
+  const third = sm.getComponent(tui, fakeTheme);
+  assert.notEqual(third, first, "fetch submenu must be recreated after commit + re-activation");
 });
 
 test("createMenuStateMachine: requestRender is called after the catalog fetch resolves", async () => {
