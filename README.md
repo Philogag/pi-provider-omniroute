@@ -24,6 +24,7 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
   - **`omniroute_web_search` tool** — wraps `POST /v1/search` with 14 search providers, 2 search types, 7 time ranges, country/language filters, and rich content extraction options.
   - **`omniroute_web_fetch` tool** — wraps `POST /v1/web/fetch` with 4 fetch providers (Firecrawl, Jina Reader, Tavily Extract, TinyFish), 4 output formats, depth, and selector wait.
   - **Configurable default provider** — both tools merge their `provider` param with the configured default at execution time (explicit param > configured provider > omit), so you can pin a default provider in `/omniroute-settings` without changing how the model calls the tools.
+- **Cost telemetry** — real USD costs from OmniRoute's `X-OmniRoute-*` telemetry are written into Pi's usage/cost statistics, with full telemetry attached to each message's `diagnostics`.
 
 ## Requirements
 
@@ -64,7 +65,13 @@ At execution time each tool resolves its provider as **explicit param > configur
 
 ### Cost telemetry
 
-Session message costs (shown in Pi's usage/cost statistics) reflect the real USD amount reported by OmniRoute's `X-OmniRoute-Response-Cost` header (streamed as SSE comment lines in the response body). Cache hits are billed at $0 by OmniRoute and show as `0`. Full telemetry (model, provider, tokens, cache-hit, latency) is attached to each message's `diagnostics` under type `omniroute-telemetry`.
+OmniRoute reports per-request cost data as SSE comment lines at the end of every streaming response body (`: x-omniroute-*`). The extension intercepts the byte stream, parses those lines, and wires the result into Pi's accounting:
+
+- **Real costs in Pi's usage statistics** — `X-OmniRoute-Response-Cost` (a fixed-point USD amount, e.g. `0.0000190400`) overwrites each message's `usage.cost.total`, so Pi's cost/usage totals reflect what OmniRoute actually billed instead of the model's static price. Token counts are kept as parsed by Pi.
+- **Cache hits bill at $0** — when `X-OmniRoute-Cache-Hit` is `true`, OmniRoute reports a `Response-Cost` of `0`; the extension applies it as-is, so cached turns show a cost of `0`.
+- **Full telemetry in `diagnostics`** — every message carries a `omniroute-telemetry` diagnostic with `model`, `provider`, `tokensIn`, `tokensOut`, `cacheHit`, `responseCost`, and `latencyMs`, so you can inspect routing details for any turn.
+
+The capture is best-effort and byte-transparent: if telemetry is absent (older OmniRoute, non-OmniRoute responses), the stream passes through untouched and Pi falls back to its static pricing.
 
 ## Development
 
