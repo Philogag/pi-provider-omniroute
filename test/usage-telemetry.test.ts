@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseOmnirouteTelemetryLine, extractOmnirouteTelemetry } from "../src/tools/usage-telemetry.ts";
+import { parseOmnirouteTelemetryLine, extractOmnirouteTelemetry, wrapStreamWithCost } from "../src/tools/usage-telemetry.ts";
 
 test("parseOmnirouteTelemetryLine parses a full comment line", () => {
   assert.deepEqual(
@@ -80,4 +80,34 @@ test("extractOmnirouteTelemetry handles CRLF line endings", () => {
 test("extractOmnirouteTelemetry returns undefined when no telemetry", () => {
   assert.equal(extractOmnirouteTelemetry("data: [DONE]"), undefined);
   assert.equal(extractOmnirouteTelemetry(""), undefined);
+});
+
+test("attaches full omniroute-telemetry diagnostic to done message via diagnostics push", async () => {
+  const stream = {
+    [Symbol.asyncIterator]: async function* () {
+      yield { type: "start", message: {} as never };
+      yield { type: "done", reason: "stop", message: { usage: { cost: { total: 0 } }, diagnostics: undefined } as never };
+    },
+  } as never;
+  const out = wrapStreamWithCost(stream, {
+    responseCost: 0.00001904,
+    tokensIn: 88,
+    tokensOut: 13,
+    model: "deepseek-v4-flash",
+    provider: "opencode-go",
+    cacheHit: false,
+  });
+  const result = await out.result();
+  assert.equal(result.diagnostics!.length, 1);
+  assert.equal(result.diagnostics![0].type, "omniroute-telemetry");
+  assert.equal(typeof result.diagnostics![0].timestamp, "number");
+  assert.deepEqual(result.diagnostics![0].details, {
+    responseCost: 0.00001904,
+    tokensIn: 88,
+    tokensOut: 13,
+    model: "deepseek-v4-flash",
+    provider: "opencode-go",
+    cacheHit: false,
+  });
+  assert.equal(result.usage.cost.total, 0.00001904);
 });

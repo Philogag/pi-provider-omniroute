@@ -5,7 +5,7 @@
 // `data: [DONE]`. The openai SDK's SSE parser ignores comment lines, so pi-ai
 // never sees them — we intercept the byte stream and parse them ourselves.
 
-import { createAssistantMessageEventStream, appendAssistantMessageDiagnostic } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
 
 export interface OmnirouteTelemetry {
@@ -164,7 +164,7 @@ export function wrapStreamWithCost(
           if (t?.responseCost !== undefined) {
             const message = event.message as AssistantMessage;
             message.usage.cost.total = t.responseCost;
-            appendAssistantMessageDiagnostic(message, {
+            (message.diagnostics ??= []).push({
               type: "omniroute-telemetry",
               timestamp: Date.now(),
               details: {
