@@ -149,7 +149,7 @@ export default async function (pi: ExtensionAPI) {
         resolveBaseUrl: () => resolveBaseUrl(ctx),
         initialCurrentProvider: currentConfigProvider,
         initialFetchProvider: currentFetchProvider,
-        initialBaseUrl: readOmnirouteConfig().baseUrl,
+        initialBaseUrl: resolveOmnirouteBaseUrl(),
         onCommitPersist: (provider) => {
           currentConfigProvider = provider;
           writeOmnirouteConfig(provider);

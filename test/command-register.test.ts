@@ -89,6 +89,7 @@ test("wrapped custom component re-resolves the state-machine component per rende
 
   // Top mode: the first render is the top-level menu.
   assert.match(wrapped.render(80).join("\n"), /Search provider/);
+  assert.match(wrapped.render(80).join("\n"), /Base URL/);
 
   // Enter switches the state machine to sub mode; the very next render must
   // reflect the sub-mode (loading) component, not the stale top-level menu.
