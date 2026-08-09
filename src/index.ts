@@ -5,7 +5,7 @@ import type { Model, Context, SimpleStreamOptions, Api } from "@earendil-works/p
 import { streamSimple as compatStreamSimple } from "@earendil-works/pi-ai/compat";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, writeOmnirouteBaseUrl, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
 import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
 import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
@@ -149,6 +149,7 @@ export default async function (pi: ExtensionAPI) {
         resolveBaseUrl: () => resolveBaseUrl(ctx),
         initialCurrentProvider: currentConfigProvider,
         initialFetchProvider: currentFetchProvider,
+        initialBaseUrl: readOmnirouteConfig().baseUrl,
         onCommitPersist: (provider) => {
           currentConfigProvider = provider;
           writeOmnirouteConfig(provider);
@@ -156,6 +157,9 @@ export default async function (pi: ExtensionAPI) {
         onCommitFetchPersist: (provider) => {
           currentFetchProvider = provider;
           writeOmnirouteConfig(provider, "fetch");
+        },
+        onCommitBaseUrlPersist: (baseUrl) => {
+          writeOmnirouteBaseUrl(baseUrl);
         },
         onClose: () => {},
       });

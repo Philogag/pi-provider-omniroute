@@ -29,8 +29,10 @@ function makeDeps(overrides: Partial<MenuStateMachineDeps> = {}): MenuStateMachi
     resolveBaseUrl: () => "http://x",
     initialCurrentProvider: undefined,
     initialFetchProvider: undefined,
+    initialBaseUrl: undefined,
     onCommitPersist: (provider) => commits.push([provider, "persisted"]),
     onCommitFetchPersist: () => {},
+    onCommitBaseUrlPersist: () => {},
     onClose: () => {},
     ...overrides,
   };

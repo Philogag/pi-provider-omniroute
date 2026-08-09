@@ -15,9 +15,11 @@ function makeParams(overrides: Partial<TopLevelMenuParams> = {}): TopLevelMenuPa
   return {
     currentProvider: "tavily-search",
     fetchPreview: "Auto",
+    baseUrlPreview: "http://localhost:20128/v1",
     theme: fakeTheme,
     onActivateSearchProvider: () => {},
     onActivateFetchProvider: () => {},
+    onActivateBaseUrl: () => {},
     ...overrides,
   };
 }
@@ -64,6 +66,24 @@ test("renderTopLevelMenu: Enter on fetch row activates fetch provider", () => {
   const component = renderTopLevelMenu(params) as unknown as { _sl: { onSelect?: (item: { value: string; label: string }) => void } };
   component._sl.onSelect?.({ value: "fetch", label: "Web Fetch provider: Auto" });
   assert.equal(activated, "fetch");
+});
+
+test("renderTopLevelMenu: renders Base URL row", () => {
+  const params = makeParams({ baseUrlPreview: "https://x/v1" });
+  const component = renderTopLevelMenu(params) as unknown as { render: (w: number) => string[] };
+  assert.match(component.render(80).join("\n"), /Base URL:\s+https:\/\/x\/v1/i);
+});
+
+test("renderTopLevelMenu: Enter on base-url row activates base URL submenu", () => {
+  let activated = "";
+  const params = makeParams({
+    onActivateSearchProvider: () => { activated = "search"; },
+    onActivateFetchProvider: () => { activated = "fetch"; },
+    onActivateBaseUrl: () => { activated = "base-url"; },
+  });
+  const component = renderTopLevelMenu(params) as unknown as { _sl: { onSelect?: (item: { value: string; label: string }) => void } };
+  component._sl.onSelect?.({ value: "base-url", label: "Base URL: https://x/v1" });
+  assert.equal(activated, "base-url");
 });
 
 test("renderTopLevelMenu: Esc does not trigger activation, invokes onClose", () => {

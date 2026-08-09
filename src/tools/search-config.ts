@@ -1,7 +1,7 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
-import { Container, Loader, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
+import { Container, Input, Loader, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { TUI } from "@earendil-works/pi-tui";
 import { DynamicBorder, getSelectListTheme, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
@@ -227,9 +227,11 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
   readonly fetchPreview: string;                     // "Auto" or provider id
+  readonly baseUrlPreview: string;                   // current effective base URL
   readonly theme: Theme;                             // UI theme
   readonly onActivateSearchProvider: () => void;
   readonly onActivateFetchProvider: () => void;
+  readonly onActivateBaseUrl: () => void;
   readonly onClose?: () => void;                     // Esc at top closes the overlay
   readonly requestRender?: () => void;               // Pattern 1: repaint after input
 }
@@ -240,16 +242,19 @@ function previewForProvider(p: string | undefined): string {
 }
 
 export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
-  const { currentProvider, fetchPreview, theme } = params;
+  const { currentProvider, fetchPreview, baseUrlPreview, theme } = params;
   const preview = previewForProvider(currentProvider);
   const items: SelectItem[] = [
     { value: "search", label: `Search provider: ${preview}` },
     { value: "fetch", label: `Web Fetch provider: ${fetchPreview}` },
+    { value: "base-url", label: `Base URL: ${baseUrlPreview}` },
   ];
   const selectList = new SelectList(items, items.length, getSelectListTheme());
   selectList.onSelect = (item: SelectItem): void => {
     if (item.value === "fetch") {
       params.onActivateFetchProvider();
+    } else if (item.value === "base-url") {
+      params.onActivateBaseUrl();
     } else {
       params.onActivateSearchProvider();
     }
@@ -447,6 +452,42 @@ export interface FetchSubmenuParams {
   readonly requestRender?: () => void;
 }
 
+// --- Base URL submenu ---
+
+export interface BaseUrlSubmenuParams {
+  readonly currentBaseUrl: string;
+  readonly theme: Theme;
+  readonly onCommit: (baseUrl: string) => void;
+  readonly onCancel: () => void;
+  readonly requestRender?: () => void;           // Pattern 1: repaint after input
+}
+
+export function renderBaseUrlSubmenu(params: BaseUrlSubmenuParams): Component {
+  const { theme } = params;
+  const input = new Input();
+  input.setValue(params.currentBaseUrl);
+  input.onSubmit = (value: string) => params.onCommit(value);
+  input.onEscape = params.onCancel;
+
+  const container = new Container();
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+  container.addChild(new Text(theme.fg("accent", theme.bold("Base URL")), 1, 0));
+  container.addChild(input as unknown as Component);
+  container.addChild(new Text(theme.fg("dim", keyHint("tui.input.submit", "save") + " · " + keyHint("tui.select.cancel", "back")), 1, 0));
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+  // A bare Container does not forward input; route keypresses to the Input.
+  (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+    input.handleInput(data);
+    params.requestRender?.();
+  };
+
+  // Expose the Input for unit tests (see test/search-config-baseurl.test.ts).
+  (container as unknown as { _input: Input })._input = input;
+
+  return container as unknown as Component;
+}
+
 // --- Menu state machine ---
 
 export interface MenuStateMachineDeps {
@@ -457,8 +498,10 @@ export interface MenuStateMachineDeps {
   readonly resolveBaseUrl: () => string;
   readonly initialCurrentProvider: string | undefined;
   readonly initialFetchProvider: string | undefined;
+  readonly initialBaseUrl: string | undefined;
   readonly onCommitPersist: (provider: string | undefined) => void;
   readonly onCommitFetchPersist: (provider: string | undefined) => void;
+  readonly onCommitBaseUrlPersist: (baseUrl: string) => void;
   readonly onClose: () => void;
 }
 
@@ -466,17 +509,19 @@ export interface MenuStateMachine {
   getComponent(tui: TUI, theme: Theme): Component;
   onActivateSearchProvider(): void;
   onActivateFetchProvider(): void;
+  onActivateBaseUrl(): void;
   onCommit(provider: string | undefined): void;
   onCancel(): void;
   onEsc(): void;
-  readonly mode: () => "top" | "sub-search" | "sub-fetch";
+  readonly mode: () => "top" | "sub-search" | "sub-fetch" | "sub-base-url";
   readonly catalog: () => SearchCatalog | undefined;
 }
 
 export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMachine {
-  let mode: "top" | "sub-search" | "sub-fetch" = "top";
+  let mode: "top" | "sub-search" | "sub-fetch" | "sub-base-url" = "top";
   let currentProvider = deps.initialCurrentProvider;
   let currentFetchProvider = deps.initialFetchProvider;
+  let currentBaseUrl = deps.initialBaseUrl ?? "";
   let catalogValue: SearchCatalog | undefined = undefined;
   let pendingFetch: AbortController | undefined;
   // Memoized submenu component (design §9.3): the SelectList inside
@@ -486,6 +531,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   // keyboard-unusable. Invalidated on every top<->sub transition and reset.
   let cachedSubmenu: Component | undefined = undefined;
   let cachedFetchSubmenu: Component | undefined = undefined;
+  let cachedBaseUrlSubmenu: Component | undefined = undefined;
   // Memoized top-level component (same rationale as the submenu caches): the
   // SelectList inside renderTopLevelMenu keeps its cursor (selectedIndex) in
   // instance state, so we must return the SAME instance across renders/inputs
@@ -525,22 +571,37 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       catalogValue = undefined;
       cachedTopLevel = undefined;
       cachedSubmenu = undefined;
+      cachedBaseUrlSubmenu = undefined;
       // Caller must call fetchCatalogAsync separately (to pass ctx); see command wiring in Task 9.
     },
     onActivateFetchProvider: () => {
       mode = "sub-fetch";
       cachedTopLevel = undefined;
       cachedFetchSubmenu = undefined;
+      cachedBaseUrlSubmenu = undefined;
+    },
+    onActivateBaseUrl: () => {
+      mode = "sub-base-url";
+      cachedTopLevel = undefined;
+      cachedBaseUrlSubmenu = undefined;
     },
     onCommit: (provider) => {
       pendingFetch?.abort();
       cachedTopLevel = undefined;
       if (mode === "sub-fetch") {
         cachedFetchSubmenu = undefined;
+        cachedBaseUrlSubmenu = undefined;
         currentFetchProvider = provider;
         deps.onCommitFetchPersist(provider);
+      } else if (mode === "sub-base-url") {
+        cachedSubmenu = undefined;
+        cachedFetchSubmenu = undefined;
+        cachedBaseUrlSubmenu = undefined;
+        currentBaseUrl = provider ?? "";
+        deps.onCommitBaseUrlPersist(provider ?? "");
       } else {
         cachedSubmenu = undefined;
+        cachedBaseUrlSubmenu = undefined;
         currentProvider = provider;
         deps.onCommitPersist(provider);
       }
@@ -551,6 +612,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
+      cachedBaseUrlSubmenu = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
@@ -559,6 +621,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
+      cachedBaseUrlSubmenu = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
@@ -570,11 +633,13 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         cachedTopLevel = renderTopLevelMenu({
           currentProvider,
           fetchPreview: previewForProvider(currentFetchProvider),
+          baseUrlPreview: currentBaseUrl,
           theme,
           onActivateSearchProvider: () => {
             mode = "sub-search";
             cachedTopLevel = undefined;
             cachedSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
             tui.requestRender();
             void fetchCatalogAsync(tui);
           },
@@ -582,12 +647,20 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
             mode = "sub-fetch";
             cachedTopLevel = undefined;
             cachedFetchSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
+            tui.requestRender();
+          },
+          onActivateBaseUrl: () => {
+            mode = "sub-base-url";
+            cachedTopLevel = undefined;
+            cachedBaseUrlSubmenu = undefined;
             tui.requestRender();
           },
           onClose: () => {
             cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             cachedFetchSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
             pendingFetch?.abort();
             mode = "top";
             deps.onClose();
@@ -616,6 +689,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
             if (data === "\x1b") {
               cachedTopLevel = undefined;
               cachedSubmenu = undefined;
+              cachedBaseUrlSubmenu = undefined;
               pendingFetch?.abort();
               mode = "top";
               tui.requestRender();
@@ -632,6 +706,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           onCommit: (p) => {
             cachedTopLevel = undefined;
             cachedSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
             pendingFetch?.abort();
             currentProvider = p;
             deps.onCommitPersist(p);
@@ -642,6 +717,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           onCancel: () => {
             cachedTopLevel = undefined;
             cachedSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
             pendingFetch?.abort();
             mode = "top";
             catalogValue = undefined;
@@ -650,28 +726,53 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         });
         return cachedSubmenu;
       }
-      // mode === "sub-fetch"
-      if (cachedFetchSubmenu) return cachedFetchSubmenu;
-      cachedFetchSubmenu = renderFetchSubmenu({
-        currentFetchProvider,
+      if (mode === "sub-fetch") {
+        if (cachedFetchSubmenu) return cachedFetchSubmenu;
+        cachedFetchSubmenu = renderFetchSubmenu({
+          currentFetchProvider,
+          theme,
+          requestRender: () => tui.requestRender(),
+          onCommit: (p) => {
+            cachedTopLevel = undefined;
+            cachedFetchSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
+            currentFetchProvider = p;
+            deps.onCommitFetchPersist(p);
+            mode = "top";
+            tui.requestRender();
+          },
+          onCancel: () => {
+            cachedTopLevel = undefined;
+            cachedFetchSubmenu = undefined;
+            cachedBaseUrlSubmenu = undefined;
+            mode = "top";
+            tui.requestRender();
+          },
+        });
+        return cachedFetchSubmenu;
+      }
+      // mode === "sub-base-url"
+      if (cachedBaseUrlSubmenu) return cachedBaseUrlSubmenu;
+      cachedBaseUrlSubmenu = renderBaseUrlSubmenu({
+        currentBaseUrl,
         theme,
         requestRender: () => tui.requestRender(),
-        onCommit: (p) => {
+        onCommit: (v) => {
           cachedTopLevel = undefined;
-          cachedFetchSubmenu = undefined;
-          currentFetchProvider = p;
-          deps.onCommitFetchPersist(p);
+          cachedBaseUrlSubmenu = undefined;
+          currentBaseUrl = v;
+          deps.onCommitBaseUrlPersist(v);
           mode = "top";
           tui.requestRender();
         },
         onCancel: () => {
           cachedTopLevel = undefined;
-          cachedFetchSubmenu = undefined;
+          cachedBaseUrlSubmenu = undefined;
           mode = "top";
           tui.requestRender();
         },
       });
-      return cachedFetchSubmenu;
+      return cachedBaseUrlSubmenu;
     },
   } as MenuStateMachine;
 }
