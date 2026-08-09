@@ -2,17 +2,19 @@ import { test, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import extension from "../src/index.ts";
 
-// Minimal ExtensionAPI double capturing the registered provider.
+// Minimal ExtensionAPI double capturing the registered provider config.
 function makePi() {
   let registered: any = null;
+  let registeredName: string | undefined;
   return {
     pi: {
-      registerProvider: (p: any) => { registered = p; },
+      registerProvider: (name: string, config: any) => { registeredName = name; registered = config; },
       registerTool: () => {},
       registerCommand: () => {},
       on: () => {},
     },
     getProvider: () => registered,
+    getProviderName: () => registeredName,
   };
 }
 
@@ -20,12 +22,6 @@ const origFetch = globalThis.fetch;
 after(() => { globalThis.fetch = origFetch; mock.restoreAll(); });
 
 test("provider stream surfaces OmniRoute cost into final message", async () => {
-  const { pi, getProvider } = makePi();
-  await extension(pi as never);
-  const provider = getProvider();
-  assert.ok(provider, "provider registered");
-  assert.equal(provider.id, "omniroute");
-
   // Proper SSE: events are separated by blank lines. The openai SDK's
   // SSEDecoder only flushes an event on an empty line, so a body joined
   // with single \n would yield zero chunks.
@@ -41,13 +37,23 @@ test("provider stream surfaces OmniRoute cost into final message", async () => {
     "",
   ].join("\n\n");
 
+  // Mocked before entry so the load-time /models fetch is hermetic too; each
+  // call builds a fresh Response (non-JSON body makes /models degrade to the
+  // empty-list fallback, while the stream still consumes the SSE).
   mock.method(globalThis, "fetch", async () =>
     new Response(new Blob([sseBody]), { status: 200, headers: { "content-type": "text/event-stream" } }),
   );
 
+  const { pi, getProvider, getProviderName } = makePi();
+  await extension(pi as never);
+  const provider = getProvider();
+  assert.ok(provider, "provider registered");
+  assert.equal(getProviderName(), "omniroute");
+  assert.equal(provider.api, "omniroute");
+
   const model = { id: "deepseek-v4-flash", api: "openai-completions", provider: "omniroute", baseUrl: "https://example.com/v1", input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } } as never;
   const context = { systemPrompt: "", messages: [] } as never;
-  const stream = provider.stream(model, context, { apiKey: "k", baseUrl: "https://example.com/v1" } as never);
+  const stream = provider.streamSimple(model, context, { apiKey: "k", baseUrl: "https://example.com/v1" } as never);
   const events: any[] = [];
   for await (const ev of stream) events.push(ev);
   const done = events.find((e) => e.type === "done");

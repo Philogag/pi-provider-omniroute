@@ -1,13 +1,11 @@
 // src/index.ts — pi extension entry
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
-import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
-import { resolveStoredBaseUrl } from "./auth-credentials.ts";
+import type { Model, Context, SimpleStreamOptions, Api } from "@earendil-works/pi-ai";
+import { streamSimple as compatStreamSimple } from "@earendil-works/pi-ai/compat";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig } from "./tools/search-config.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
 import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
 import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
@@ -18,7 +16,7 @@ setSearchConfigReader(() => currentConfigProvider);
 let currentFetchProvider: string | undefined = undefined;
 setFetchConfigReader(() => currentFetchProvider);
 
-type OmnirouteModel = Model<"openai-completions">;
+type OmnirouteModel = Model<"omniroute">;
 
 interface OmnirouteModelEntry {
   id: string;
@@ -56,7 +54,7 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
   const result: OmnirouteModel = {
     id: m.id,
     name: typeof m.name === "string" ? m.name : m.id,
-    api: "openai-completions" as const,
+    api: "omniroute" as const,
     provider: "omniroute",
     baseUrl,
     reasoning: m.capabilities?.reasoning === true,
@@ -75,50 +73,41 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
 }
 
 export default async function (pi: ExtensionAPI) {
-  const storedBaseUrl = resolveStoredBaseUrl();
-  const baseUrl = storedBaseUrl ?? process.env.OMNIROUTE_BASE_URL ?? OMNIROUTE_DEFAULT_BASE_URL;
+  const baseUrl = resolveOmnirouteBaseUrl();
 
   let models: OmnirouteModel[] = [];
-
-  const provider: Provider<"openai-completions"> = {
-    id: "omniroute",
-    name: "OmniRoute",
-    baseUrl,
-    auth: { apiKey: omnirouteApiKeyAuth() },
-    getModels: () => models,
-    async refreshModels({ signal }) {
-      const res = await fetch(`${baseUrl}/models`, { signal });
-      if (!res.ok) throw new Error(`OmniRoute /models failed: ${res.status}`);
+  try {
+    const res = await fetch(`${baseUrl}/models`);
+    if (!res.ok) {
+      console.warn(`[omniroute] /models failed: ${res.status}; using empty model list`);
+    } else {
       const { data } = (await res.json()) as { data: OmnirouteModelEntry[] };
-      models = data.map((m) => toOmnirouteModel(m, baseUrl));
-    },
-    stream: (
-      model: OmnirouteModel,
-      context: Context,
-      options?: StreamOptions,
-    ) => {
-      let telemetry: OmnirouteTelemetry | undefined = undefined;
-      const captured = withOmnirouteFetch(fetch, (t) => { telemetry = t; });
-      return wrapStreamWithCost(
-        stream(model, context, { ...options, fetch: captured } as never),
-        () => telemetry,
-      );
-    },
-    streamSimple: (
-      model: OmnirouteModel,
-      context: Context,
-      options?: SimpleStreamOptions,
-    ) => {
-      let telemetry: OmnirouteTelemetry | undefined = undefined;
-      const captured = withOmnirouteFetch(fetch, (t) => { telemetry = t; });
-      return wrapStreamWithCost(
-        streamSimple(model, context, { ...options, fetch: captured }),
-        () => telemetry,
-      );
-    },
+      if (Array.isArray(data)) models = data.map((m) => toOmnirouteModel(m, baseUrl));
+      else console.warn(`[omniroute] /models response missing data array; using empty model list`);
+    }
+  } catch (err) {
+    console.warn(`[omniroute] /models fetch failed: ${err instanceof Error ? err.message : err}; using empty model list`);
+  }
+
+  const streamSimple = (
+    model: Model<Api>,
+    context: Context,
+    options?: SimpleStreamOptions,
+  ) => {
+    let telemetry: OmnirouteTelemetry | undefined = undefined;
+    const captured = withOmnirouteFetch(fetch, (t) => { telemetry = t; });
+    return wrapStreamWithCost(
+      compatStreamSimple(model, context, { ...options, fetch: captured }),
+      () => telemetry,
+    );
   };
 
-  pi.registerProvider(provider);
+  pi.registerProvider("omniroute", {
+    baseUrl,
+    api: "omniroute",
+    streamSimple,
+    models,
+  });
 
   for (const tool of [searchTool, webFetchTool]) {
     try {

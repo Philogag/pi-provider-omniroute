@@ -1,4 +1,4 @@
-import { test, mock, after } from "node:test";
+import { test, mock, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import entry from "../src/index.ts";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
@@ -9,11 +9,21 @@ let registerProviderCount = 0;
 let registerToolCount = 0;
 let sessionStartHandler: ((...args: unknown[]) => unknown) | undefined;
 
-after(() => { mock.restoreAll(); });
+const origBaseUrl = process.env.OMNIROUTE_BASE_URL;
+beforeEach(() => {
+  // Unreachable loopback: the load-time /models fetch and the command's
+  // catalog fetch both fail fast → warn + fallback, keeping tests hermetic.
+  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1";
+});
+after(() => {
+  if (origBaseUrl === undefined) delete process.env.OMNIROUTE_BASE_URL;
+  else process.env.OMNIROUTE_BASE_URL = origBaseUrl;
+  mock.restoreAll();
+});
 
 function mockPi(): ExtensionAPI {
   return {
-    registerProvider: () => { registerProviderCount++; },
+    registerProvider: (_name: string, _config: unknown) => { registerProviderCount++; },
     registerTool: () => { registerToolCount++; },
     registerCommand: (name: string, opts: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) => {
       registeredCommands[name] = opts.handler;
@@ -46,11 +56,6 @@ test("/omniroute-settings in non-TUI mode notifies without opening UI", async ()
 test("wrapped custom component re-resolves the state-machine component per render", async () => {
   initTheme(); // the TUI path renders via the passed-in UI theme; initTheme must run first
   await entry(mockPi());
-
-  // Point the catalog fetch at an unreachable loopback port so it refuses
-  // quickly and falls back to the built-in list instead of holding the loop.
-  const prevBaseUrl = process.env.OMNIROUTE_BASE_URL;
-  process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1";
 
   let factory:
     | ((tui: unknown, theme: unknown, kb: unknown, done: (r?: unknown) => void) => unknown)
@@ -106,7 +111,4 @@ test("wrapped custom component re-resolves the state-machine component per rende
   doneResult = "unset";
   wrapped.handleInput("\x1b");
   assert.equal(doneResult, undefined, "top-level Esc must call done(undefined)");
-
-  if (prevBaseUrl === undefined) delete process.env.OMNIROUTE_BASE_URL;
-  else process.env.OMNIROUTE_BASE_URL = prevBaseUrl;
 });

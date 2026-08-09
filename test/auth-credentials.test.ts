@@ -43,22 +43,6 @@ test("readCredential: returns omniroute entry with env", async () => {
   assert.deepEqual(readCredential(), cred);
 });
 
-test("resolveStoredBaseUrl: returns baseUrl from credential env", async () => {
-  const cred = { type: "api_key", key: "abc", env: { OMNIROUTE_BASE_URL: "https://x/v1" } };
-  writeFileSync(join(tmpDir!, "auth.json"), JSON.stringify({ omniroute: cred }));
-  const { resolveStoredBaseUrl } = await import("../src/auth-credentials.ts");
-  assert.equal(resolveStoredBaseUrl(), "https://x/v1");
-});
-
-test("resolveStoredBaseUrl: returns undefined when env missing", async () => {
-  writeFileSync(
-    join(tmpDir!, "auth.json"),
-    JSON.stringify({ omniroute: { type: "api_key", key: "abc" } }),
-  );
-  const { resolveStoredBaseUrl } = await import("../src/auth-credentials.ts");
-  assert.equal(resolveStoredBaseUrl(), undefined);
-});
-
 test("resolveAuthJsonPath: uses PI_AGENT_DIR when set", async () => {
   const { resolveAuthJsonPath } = await import("../src/auth-credentials.ts");
   assert.equal(resolveAuthJsonPath(), join(tmpDir!, "auth.json"));

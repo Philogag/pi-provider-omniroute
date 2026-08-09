@@ -40,9 +40,3 @@ export function readCredential(): StoredCredential | undefined {
   if (!cred || typeof cred !== "object") return undefined;
   return cred as StoredCredential;
 }
-
-export function resolveStoredBaseUrl(): string | undefined {
-  const cred = readCredential();
-  if (!cred) return undefined;
-  return cred.env?.OMNIROUTE_BASE_URL;
-}
