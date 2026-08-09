@@ -26,6 +26,8 @@
 - **当** 遥测解析结果 `responseCost` 为数字
 - **那么** done 消息的 `usage.cost.total` 被覆盖为该值；当遥测缺失时 `usage.cost.total` 保持原值
 
+## 新增需求
+
 ### 需求:以双参数表单注册 provider
 
 扩展**必须**通过双参数形式 `pi.registerProvider(providerName: string, config)` 注册 OmniRoute provider，其中 `config` 为 ProviderConfigInput 兼容对象，**禁止**使用单参数 Provider 对象形式（omp 不支持）。配置对象**必须**包含：
