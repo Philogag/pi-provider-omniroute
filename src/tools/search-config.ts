@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FETCH_PROVIDERS, normalizeFetchProvider } from "./web-fetch.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL } from "../auth.ts";
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -282,6 +283,7 @@ export function resolveOmnirouteConfigPath(): string {
 }
 
 export interface OmnirouteConfigShape {
+  readonly baseUrl?: string;
   readonly search?: { readonly provider?: string };
   readonly fetch?: { readonly provider?: string };
 }
@@ -308,7 +310,12 @@ export function readOmnirouteConfig(): OmnirouteConfigShape {
     return {};
   }
   const root = parsed as Record<string, unknown>;
-  const result: { search?: { provider: string }; fetch?: { provider: string } } = {};
+  const result: { baseUrl?: string; search?: { provider: string }; fetch?: { provider: string } } = {};
+  const rawBaseUrl = root["baseUrl"];
+  if (typeof rawBaseUrl === "string") result.baseUrl = rawBaseUrl;
+  else if (rawBaseUrl !== undefined) {
+    console.warn(`[omniroute] ${path} \`baseUrl\` is not a string; treating as unset`);
+  }
   for (const key of ["search", "fetch"] as const) {
     const branch = root[key];
     if (branch === undefined) continue;
@@ -361,6 +368,41 @@ export function writeOmnirouteConfig(provider: string | undefined, key: "search"
     console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
     try { unlinkSync(tmp); } catch { /* ignore */ }
   }
+}
+
+export function writeOmnirouteBaseUrl(baseUrl: string | undefined): void {
+  const path = resolveOmnirouteConfigPath();
+  const tmp = path + ".tmp";
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      root = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[omniroute] failed to read ${path} before write: ${(err as Error).message}`);
+    }
+  }
+  if (baseUrl === undefined) delete root["baseUrl"];
+  else root["baseUrl"] = baseUrl;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(root, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+  }
+}
+
+export function resolveOmnirouteBaseUrl(): string {
+  return (
+    readOmnirouteConfig().baseUrl ??
+    process.env.OMNIROUTE_BASE_URL ??
+    OMNIROUTE_DEFAULT_BASE_URL
+  );
 }
 
 // --- Fetch provider submenu ---

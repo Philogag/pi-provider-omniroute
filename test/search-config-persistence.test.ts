@@ -1,13 +1,16 @@
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, chmodSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   resolveOmnirouteConfigPath,
   readOmnirouteConfig,
   writeOmnirouteConfig,
+  writeOmnirouteBaseUrl,
+  resolveOmnirouteBaseUrl,
 } from "../src/tools/search-config.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL } from "../src/auth.ts";
 
 const origPiAgentDir = process.env.PI_AGENT_DIR;
 let dir: string;
@@ -162,6 +165,62 @@ test("readOmnirouteConfig: non-object fetch warns once but search is still read"
   }
   assert.equal(warns, 1, "exactly one warn for non-object fetch");
   assert.deepEqual(cfg, { search: { provider: "tavily-search" } });
+});
+
+test("readOmnirouteConfig: parses root baseUrl string", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: "https://x/v1" }));
+  assert.equal(readOmnirouteConfig().baseUrl, "https://x/v1");
+});
+
+test("readOmnirouteConfig: non-string baseUrl warns and is skipped", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: 123 }));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  let cfg: unknown;
+  try {
+    cfg = readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "expected exactly one console.warn for non-string baseUrl");
+  assert.equal((cfg as { baseUrl?: string }).baseUrl, undefined);
+});
+
+test("writeOmnirouteBaseUrl: writes root baseUrl preserving unknown keys", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ search: { provider: "tavily-search" } }));
+  writeOmnirouteBaseUrl("https://y/v1");
+  const out = JSON.parse(readFileSync(seedPath, "utf8"));
+  assert.deepEqual(out, { search: { provider: "tavily-search" }, baseUrl: "https://y/v1" });
+});
+
+test("writeOmnirouteBaseUrl: undefined deletes root baseUrl", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: "https://y/v1" }));
+  writeOmnirouteBaseUrl(undefined);
+  const out = JSON.parse(readFileSync(seedPath, "utf8"));
+  assert.equal(out.baseUrl, undefined);
+  assert.deepEqual(out, {});
+});
+
+test("resolveOmnirouteBaseUrl: file beats env beats default", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: "https://file/v1" }));
+  const origEnv = process.env.OMNIROUTE_BASE_URL;
+  process.env.OMNIROUTE_BASE_URL = "https://env/v1";
+  try {
+    assert.equal(resolveOmnirouteBaseUrl(), "https://file/v1");
+    rmSync(seedPath);
+    assert.equal(resolveOmnirouteBaseUrl(), "https://env/v1");
+    delete process.env.OMNIROUTE_BASE_URL;
+    assert.equal(resolveOmnirouteBaseUrl(), OMNIROUTE_DEFAULT_BASE_URL);
+  } finally {
+    if (origEnv === undefined) delete process.env.OMNIROUTE_BASE_URL;
+    else process.env.OMNIROUTE_BASE_URL = origEnv;
+  }
 });
 
 test("writeOmnirouteConfig: write failure (read-only dir) warns but does not throw", () => {
