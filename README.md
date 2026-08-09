@@ -36,12 +36,20 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
 pi install git:github.com/Philogag/pi-provider-omniroute
 ```
 
-Then connect into your OmniRoute instance: set your API key with Pi's normal credential store (`/login omniroute`) and (optionally) pin the base URL in `/omniroute-settings` or via `$OMNIROUTE_BASE_URL`.
+## Basic Setup
 
+### Step1. Config BaseURL (Optional)
+
+If your OmniRoute running on `http://localhost:20128`, you can skip this step. 
+
+Run `/omniroute-settings` in pi, enter the `Base Url` submenu, and input your OmniRoute instance 
 
 > Get the "OmniRoute base URL" from your OmniRoute Dashboard  
 > -> "Endpoints" -> "API Endpoint" -> "Public"  
 > Which should looks like "http://localhost:20128/v1"   
+
+### Step2. Login With API Key
+Run `/login` in pi, select `OmniRoute` and paste the key 
 
 ## Default tool providers
 
