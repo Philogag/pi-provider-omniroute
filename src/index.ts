@@ -78,13 +78,14 @@ export default async function (pi: ExtensionAPI) {
   const baseUrl = resolveOmnirouteBaseUrl();
 
   // One-time migration notice: pre-dual-arg versions stored the base URL inside
-  // the auth.json credential (env.OMNIROUTE_BASE_URL). It is no longer read;
-  // if a user relied on it and has no new-style override, tell them once.
+  // the auth.json credential (env.OMNIROUTE_BASE_URL) — always, even for the
+  // default. It is no longer read; warn only when the dropped value actually
+  // differs from the default now in effect.
   const credential = readCredential();
   const legacyBaseUrl = credential?.env?.["OMNIROUTE_BASE_URL"];
   if (
     legacyBaseUrl &&
-    baseUrl === OMNIROUTE_DEFAULT_BASE_URL &&
+    legacyBaseUrl !== OMNIROUTE_DEFAULT_BASE_URL &&
     !readOmnirouteConfig().baseUrl &&
     !process.env.OMNIROUTE_BASE_URL
   ) {
