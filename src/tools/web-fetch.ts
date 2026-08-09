@@ -106,7 +106,7 @@ export const webFetchTool = defineTool({
         content: [
           {
             type: "text",
-            text: "OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.",
+            text: "OmniRoute API key is not configured. Run /login omniroute to store one.",
           },
         ],
         details: undefined,

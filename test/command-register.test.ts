@@ -1,5 +1,8 @@
 import { test, mock, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import entry from "../src/index.ts";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -10,7 +13,11 @@ let registerToolCount = 0;
 let sessionStartHandler: ((...args: unknown[]) => unknown) | undefined;
 
 const origBaseUrl = process.env.OMNIROUTE_BASE_URL;
+const origPiAgentDir = process.env.PI_AGENT_DIR;
 beforeEach(() => {
+  // Isolate from the developer's real ~/.pi/agent/omniroute.json (a file
+  // baseUrl would beat the env override and could hit a real server / hang).
+  process.env.PI_AGENT_DIR = mkdtempSync(join(tmpdir(), "omniroute-cmd-"));
   // Unreachable loopback: the load-time /models fetch and the command's
   // catalog fetch both fail fast → warn + fallback, keeping tests hermetic.
   process.env.OMNIROUTE_BASE_URL = "http://127.0.0.1:1";
@@ -18,6 +25,8 @@ beforeEach(() => {
 after(() => {
   if (origBaseUrl === undefined) delete process.env.OMNIROUTE_BASE_URL;
   else process.env.OMNIROUTE_BASE_URL = origBaseUrl;
+  if (origPiAgentDir === undefined) delete process.env.PI_AGENT_DIR;
+  else process.env.PI_AGENT_DIR = origPiAgentDir;
   mock.restoreAll();
 });
 

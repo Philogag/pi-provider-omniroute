@@ -5,6 +5,7 @@ import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import {
   renderBaseUrlSubmenu,
   createMenuStateMachine,
+  sanitizeBaseUrlForPersist,
   type MenuStateMachineDeps,
 } from "../src/tools/search-config.ts";
 import type { TUI } from "@earendil-works/pi-tui";
@@ -86,7 +87,7 @@ test("createMenuStateMachine: onActivateBaseUrl switches to sub-base-url mode", 
 });
 
 test("createMenuStateMachine: base-url commit calls onCommitBaseUrlPersist and returns to top", () => {
-  const persisted: Array<string> = [];
+  const persisted: Array<string | undefined> = [];
   const sm = createMenuStateMachine(makeDeps({ onCommitBaseUrlPersist: (v) => persisted.push(v) }));
   sm.onActivateBaseUrl();
   sm.onCommit("https://new/v1");
@@ -122,4 +123,29 @@ test("createMenuStateMachine: base-url cancel returns to top without persisting"
   sm.onCancel();
   assert.equal(sm.mode(), "top");
   assert.equal(persisted, false);
+});
+
+test("createMenuStateMachine: base-url commit with empty input deletes stored value (undefined persist)", () => {
+  const persisted: Array<string | undefined> = [];
+  const sm = createMenuStateMachine(makeDeps({ onCommitBaseUrlPersist: (v) => persisted.push(v) }));
+  sm.onActivateBaseUrl();
+  sm.onCommit("   "); // whitespace-only → sanitize to undefined (delete)
+  assert.deepEqual(persisted, [undefined]);
+  assert.equal(sm.mode(), "top");
+});
+
+test("createMenuStateMachine: base-url commit with invalid URL refuses to persist", () => {
+  const persisted: Array<string | undefined> = [];
+  const sm = createMenuStateMachine(makeDeps({ onCommitBaseUrlPersist: (v) => persisted.push(v) }));
+  sm.onActivateBaseUrl();
+  sm.onCommit("not a url");
+  assert.deepEqual(persisted, [], "invalid URL must not be persisted");
+  assert.equal(sm.mode(), "top");
+});
+
+test("sanitizeBaseUrlForPersist: empty → undefined, valid → normalized, invalid → { ok:false }", () => {
+  assert.deepEqual(sanitizeBaseUrlForPersist("   "), { ok: true, value: undefined });
+  assert.deepEqual(sanitizeBaseUrlForPersist("https://new/v1"), { ok: true, value: "https://new/v1" });
+  const bad = sanitizeBaseUrlForPersist("ftp://nope");
+  assert.equal(bad.ok, false);
 });

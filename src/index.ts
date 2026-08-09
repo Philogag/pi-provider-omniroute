@@ -5,7 +5,9 @@ import type { Model, Context, SimpleStreamOptions, Api } from "@earendil-works/p
 import { streamSimple as compatStreamSimple } from "@earendil-works/pi-ai/compat";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, writeOmnirouteBaseUrl, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, writeOmnirouteBaseUrl, resolveOmnirouteBaseUrl, DEFAULT_TIMEOUT_MS } from "./tools/search-config.ts";
+import { readCredential } from "./auth-credentials.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
 import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
 import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
@@ -75,9 +77,28 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
 export default async function (pi: ExtensionAPI) {
   const baseUrl = resolveOmnirouteBaseUrl();
 
+  // One-time migration notice: pre-dual-arg versions stored the base URL inside
+  // the auth.json credential (env.OMNIROUTE_BASE_URL). It is no longer read;
+  // if a user relied on it and has no new-style override, tell them once.
+  const credential = readCredential();
+  const legacyBaseUrl = credential?.env?.["OMNIROUTE_BASE_URL"];
+  if (
+    legacyBaseUrl &&
+    baseUrl === OMNIROUTE_DEFAULT_BASE_URL &&
+    !readOmnirouteConfig().baseUrl &&
+    !process.env.OMNIROUTE_BASE_URL
+  ) {
+    console.warn(
+      `[omniroute] your old /login stored base URL ${JSON.stringify(legacyBaseUrl)} is no longer read; ` +
+        "set it in /omniroute-settings (Base URL) or OMNIROUTE_BASE_URL if it differs from the default",
+    );
+  }
+
   let models: OmnirouteModel[] = [];
   try {
-    const res = await fetch(`${baseUrl}/models`);
+    const res = await fetch(`${baseUrl}/models`, {
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
     if (!res.ok) {
       console.warn(`[omniroute] /models failed: ${res.status}; using empty model list`);
     } else {
@@ -86,7 +107,9 @@ export default async function (pi: ExtensionAPI) {
       else console.warn(`[omniroute] /models response missing data array; using empty model list`);
     }
   } catch (err) {
-    console.warn(`[omniroute] /models fetch failed: ${err instanceof Error ? err.message : err}; using empty model list`);
+    console.warn(
+      `[omniroute] /models unavailable (${err instanceof Error ? err.message : err}); using empty model list`,
+    );
   }
 
   const streamSimple = (
@@ -141,7 +164,7 @@ export default async function (pi: ExtensionAPI) {
       // Verify the API key before opening the menu (spec G3).
       const apiKey = await resolveApiKey(ctx);
       if (!apiKey) {
-        ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.", "error");
+        ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute to store one.", "error");
         return;
       }
       const sm = createMenuStateMachine({

@@ -17,7 +17,7 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
   - **可配置 base URL** —— 服务端地址按 `omniroute.json` → `$OMNIROUTE_BASE_URL` → `http://localhost:20128/v1` 解析，也可在 `/omniroute-settings` 中交互编辑。
 - **Settings**
   - **`/omniroute-settings` TUI 菜单** —— 三级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，或编辑 **Base URL**，每项显示当前生效值。
-  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider` / 根级 `baseUrl`），每次会话启动自动加载。
+  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider` / 根级 `baseUrl`），每次会话启动自动加载。注意：Base URL 在扩展加载时已注册为 provider 地址，修改后需重启 Pi 生效。
 - **Tool**
   - **`omniroute_web_search` 工具** —— 封装 `POST /v1/search`，支持 14 个搜索引擎、2 种搜索类型、7 个时间范围、国家/语言过滤与可选的全文抽取。
   - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。

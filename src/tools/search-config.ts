@@ -8,7 +8,17 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FETCH_PROVIDERS, normalizeFetchProvider } from "./web-fetch.ts";
-import { OMNIROUTE_DEFAULT_BASE_URL } from "../auth.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL, validateAndNormalizeBaseUrl } from "../auth.ts";
+
+export function sanitizeBaseUrlForPersist(input: string): { ok: true; value: string | undefined } | { ok: false } {
+  const trimmed = input.trim();
+  if (trimmed === "") return { ok: true, value: undefined }; // empty → delete, fall through to env/default
+  try {
+    return { ok: true, value: validateAndNormalizeBaseUrl(trimmed) };
+  } catch {
+    return { ok: false }; // invalid URL → refuse to persist, keep current value
+  }
+}
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -70,7 +80,7 @@ function staticFallback(): readonly SearchProviderEntry[] {
 }
 
 // --- Public API ---
-const DEFAULT_TIMEOUT_MS = 10_000;
+export const DEFAULT_TIMEOUT_MS = 10_000;
 
 export async function fetchSearchProviders(
   baseUrl: string,
@@ -501,7 +511,7 @@ export interface MenuStateMachineDeps {
   readonly initialBaseUrl: string | undefined;
   readonly onCommitPersist: (provider: string | undefined) => void;
   readonly onCommitFetchPersist: (provider: string | undefined) => void;
-  readonly onCommitBaseUrlPersist: (baseUrl: string) => void;
+  readonly onCommitBaseUrlPersist: (baseUrl: string | undefined) => void;
   readonly onClose: () => void;
 }
 
@@ -536,7 +546,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   // SelectList inside renderTopLevelMenu keeps its cursor (selectedIndex) in
   // instance state, so we must return the SAME instance across renders/inputs
   // while in top mode, or the cursor resets to row 0 on every frame and the
-  // two-row menu becomes keyboard-unusable (the "Web Fetch provider" row would
+  // Memoized menu components become keyboard-unusable (the "Web Fetch provider" row would
   // be unreachable). Invalidated on every mode transition / close.
   let cachedTopLevel: Component | undefined = undefined;
 
@@ -597,8 +607,15 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         cachedSubmenu = undefined;
         cachedFetchSubmenu = undefined;
         cachedBaseUrlSubmenu = undefined;
-        currentBaseUrl = provider ?? "";
-        deps.onCommitBaseUrlPersist(provider ?? "");
+        const result = sanitizeBaseUrlForPersist(provider ?? "");
+        if (!result.ok) {
+          console.warn(`[omniroute] invalid base URL, keeping current value`);
+          mode = "top";
+          catalogValue = undefined;
+          return;
+        }
+        currentBaseUrl = result.value ?? "";
+        deps.onCommitBaseUrlPersist(result.value);
       } else {
         cachedSubmenu = undefined;
         cachedBaseUrlSubmenu = undefined;
@@ -758,10 +775,17 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         theme,
         requestRender: () => tui.requestRender(),
         onCommit: (v) => {
+          const result = sanitizeBaseUrlForPersist(v);
+          if (!result.ok) {
+            console.warn(`[omniroute] invalid base URL, keeping current value`);
+            mode = "top";
+            tui.requestRender();
+            return;
+          }
           cachedTopLevel = undefined;
           cachedBaseUrlSubmenu = undefined;
-          currentBaseUrl = v;
-          deps.onCommitBaseUrlPersist(v);
+          currentBaseUrl = result.value ?? "";
+          deps.onCommitBaseUrlPersist(result.value);
           mode = "top";
           tui.requestRender();
         },

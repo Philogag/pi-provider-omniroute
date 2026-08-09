@@ -51,7 +51,7 @@ Both tools send their requests without a `provider` field unless one is explicit
 /omniroute-settings
 ```
 
-This opens an interactive TUI menu (top-level → provider submenu) with the currently enabled provider marked with `✓`. Selections are persisted to the pi-global config file at `$PI_AGENT_DIR/omniroute.json` (or `~/.pi/agent/omniroute.json`):
+This opens an interactive TUI menu (top-level → provider submenu) with the currently enabled provider marked with `✓`. Selections are persisted to the pi-global config file at `$PI_AGENT_DIR/omniroute.json` (or `~/.pi/agent/omniroute.json`). Note: a Base URL change takes effect after the next restart, since the provider is registered at extension load.
 
 ```json
 {
