@@ -12,13 +12,12 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
 
 - **Provider**
   - **OpenAI 兼容 chat provider** —— 在 `omniroute` provider 名下注册 OmniRoute，支持流式 chat completions 与 tool calling。
-  - **交互式登录** —— `/login` 时依次提示输入 API key 与 base URL，URL 非法可重试一次，默认值 `http://localhost:20128/v1`。
-  - **自动导入模型** —— 启动时调用 `GET /v1/models`，把每个被路由的模型（如 `openai/gpt-4o`）注册为 Pi 模型。
-  - **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。
-  - **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
+  - **标准凭据存储** —— API key 走 Pi 自带的 `/login` 凭据存储（无自定义登录流程），key 处理遵循 Pi 自身的安全模型。
+  - **静态模型列表** —— 启动时调用一次 `GET /v1/models` 生成静态模型列表；OmniRoute 不可达时降级为空列表并告警，不影响 Pi 启动。
+  - **可配置 base URL** —— 服务端地址按 `omniroute.json` → `$OMNIROUTE_BASE_URL` → `http://localhost:20128/v1` 解析，也可在 `/omniroute-settings` 中交互编辑。
 - **Settings**
-  - **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，当前启用项行首标 `✓`。
-  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider`），每次会话启动自动加载。
+  - **`/omniroute-settings` TUI 菜单** —— 三级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，或编辑 **Base URL**，每项显示当前生效值。
+  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider` / 根级 `baseUrl`），每次会话启动自动加载。
 - **Tool**
   - **`omniroute_web_search` 工具** —— 封装 `POST /v1/search`，支持 14 个搜索引擎、2 种搜索类型、7 个时间范围、国家/语言过滤与可选的全文抽取。
   - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
@@ -51,14 +50,12 @@ pi install git:github.com/Philogag/pi-provider-omniroute
 如 OmniRoute 部署在别处，可任选其一：
 
 - 设置环境变量 `OMNIROUTE_BASE_URL=https://your-host/v1`，**或**
-- 在 Pi 中执行 `/login`，按提示输入新 URL（输入非法可重试一次）。
+- 在 Pi 中执行 `/login` 并粘贴 OmniRoute API key，**或**
+- 在 `/omniroute-settings` 的 Base URL 项中交互编辑（写入 `omniroute.json`）。
 
 ### 2. 提供 API key
 
-二选一：
-
-- 在 Pi 中执行 `/login` 并粘贴 OmniRoute API key；**或**
-- 设置环境变量 `OMNIROUTE_API_KEY`。
+- 在 Pi 中执行 `/login` 并粘贴 OmniRoute API key。
 
 API key 会写入 Pi 的 `auth.json`（路径：`$PI_AGENT_DIR/auth.json` 或 `~/.pi/agent/auth.json`）。
 
@@ -151,7 +148,7 @@ npm test
 ```text
 src/
   index.ts              # 扩展入口：registerProvider + registerTool
-  auth.ts               # URL 校验 + 交互式 /login 流程
+  auth.ts               # URL 校验辅助（默认 base URL + 规范化）
   auth-credentials.ts   # 从 auth.json 解析已存储凭据
   tools/
     http.ts             # HTTP 工具、凭据解析、错误约定

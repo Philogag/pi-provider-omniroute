@@ -13,13 +13,12 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
 ## Features
 
 - **Provider**
-  - **OpenAI-compatible chat provider** — registers OmniRoute under the `omniroute` provider id, streams chat completions, and supports tool calling.
-  - **Interactive login** — `/login` prompts for an API key and base URL, with retry on invalid URLs and a sensible default of `http://localhost:20128/v1`.
-  - **Auto-imported models** — at startup, fetches `GET /v1/models` and registers every routed model (e.g. `openai/gpt-4o`) as a Pi model.
-  - **Lazy model refresh** — model list is fetched on demand, not eagerly on extension load, so Pi starts even if OmniRoute is offline.
+  - **OpenAI-compatible chat provider** — registers OmniRoute under the `omniroute` provider id with a **static model list** (fetched once from `GET /v1/models` at startup; degraded to an empty list with a warning if OmniRoute is unreachable), streams chat completions, and supports tool calling.
+  - **Standard stored credentials** — the API key comes from Pi's normal `/login` credential store (no custom auth flow), so key handling follows Pi's own security model.
+  - **Configurable base URL** — the server URL is resolved from `omniroute.json` → `$OMNIROUTE_BASE_URL` → `http://localhost:20128/v1`, and can be edited interactively from `/omniroute-settings`.
 - **Settings**
-  - **`/omniroute-settings` TUI menu** — a two-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback) or a default **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), each with a `✓` marker on the currently active entry.
-  - **Persistent config** — choices are saved to the pi-global `omniroute.json` (`search.provider` / `fetch.provider`) and re-loaded on every session start.
+  - **`/omniroute-settings` TUI menu** — a three-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback), a default **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), or edit the **Base URL** — each entry shows the currently active value.
+  - **Persistent config** — choices are saved to the pi-global `omniroute.json` (`search.provider` / `fetch.provider` / root `baseUrl`) and re-loaded on every session start.
 - **Tool**
   - **`omniroute_web_search` tool** — wraps `POST /v1/search` with 14 search providers, 2 search types, 7 time ranges, country/language filters, and rich content extraction options.
   - **`omniroute_web_fetch` tool** — wraps `POST /v1/web/fetch` with 4 fetch providers (Firecrawl, Jina Reader, Tavily Extract, TinyFish), 4 output formats, depth, and selector wait.
@@ -37,7 +36,7 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
 pi install git:github.com/Philogag/pi-provider-omniroute
 ```
 
-Then connect into your OmniRoute instance with `/login omniroute` and paste your API KEY and base URL
+Then connect into your OmniRoute instance: set your API key with Pi's normal credential store (`/login omniroute`) and (optionally) pin the base URL in `/omniroute-settings` or via `$OMNIROUTE_BASE_URL`.
 
 
 > Get the "OmniRoute base URL" from your OmniRoute Dashboard  
@@ -56,6 +55,7 @@ This opens an interactive TUI menu (top-level → provider submenu) with the cur
 
 ```json
 {
+  "baseUrl": "http://localhost:20128/v1",
   "search": { "provider": "tavily-search" },
   "fetch": { "provider": "jina-reader" }
 }
@@ -83,14 +83,14 @@ npm run typecheck
 npm test
 ```
 
-The test suite uses Node's `--experimental-strip-types` and exercises auth flows, URL validation, lazy model fetching, and both tools. No network access is required.
+The test suite uses Node's `--experimental-strip-types` and exercises auth flows, URL validation, model list fetching, settings persistence, cost telemetry, and both tools. No network access is required.
 
 ### Project layout
 
 ```text
 src/
   index.ts              # Extension entry: registerProvider + registerTool
-  auth.ts               # URL validation + interactive /login flow
+  auth.ts               # URL validation helpers (default base URL + normalize)
   auth-credentials.ts   # Stored-credential resolution from auth.json
   tools/
     http.ts             # Shared HTTP helper, credential resolver, error contract
