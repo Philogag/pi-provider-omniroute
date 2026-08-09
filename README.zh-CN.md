@@ -82,7 +82,7 @@ pi --list-models | grep omniroute
 
 两个工具共同点：
 
-- 复用 omniroute provider 的凭据（`OMNIROUTE_API_KEY` 或已存储的 key）。
+- 复用 omniroute provider 的已存储凭据（Pi `/login` 写入的 key）。
 - 默认 30 秒超时，可通过 `timeoutMs`（1–120000）按调用覆盖。
 - 返回纯文本主体，最多 40000 字符，避免撑爆上下文窗口。
 
@@ -141,7 +141,7 @@ npm run typecheck
 npm test
 ```
 
-测试套件基于 Node `--experimental-strip-types`，覆盖 auth 流程、URL 校验、模型懒加载与两个工具。无需联网。
+测试套件基于 Node `--experimental-strip-types`，覆盖 auth 流程、URL 校验、模型列表拉取、settings 持久化、成本遥测与两个工具。无需联网。
 
 ### 目录结构
 
@@ -166,7 +166,7 @@ openspec/               # 规范驱动的变更追踪
 
 本扩展按阶段推进，详见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-- **阶段 1 ✅** OpenAI 兼容 provider + 自动导入模型 + 懒加载。
+- **阶段 1 ✅** OpenAI 兼容 provider + 静态模型列表 + 成本遥测。
 - **阶段 2 🚧** 封装核心管理端点为工具：`omniroute_providers_*`、`omniroute_models_*`、`omniroute_keys_*`、`omniroute_usage_*`、`omniroute_combos_*`、`omniroute_fallback_*`、`omniroute_telemetry_*`。搜索/抓取已随 `add-search-fetch-tools` 发布。
 - **阶段 3** 内存、压缩、设置/定价、CLI/嵌入式服务。
 - **阶段 4** 通过 `X-OmniRoute-*` 响应头展示成本/用量；通过 `/api/agent-skills` 动态发现能力；从 `/api/models/catalog` 与 `/api/pricing/models` 补齐模型元数据。
