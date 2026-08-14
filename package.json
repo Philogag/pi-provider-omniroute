@@ -1,6 +1,6 @@
 {
   "name": "pi-provider-omniroute",
-  "version": "1.0.0",
+  "version": "0.0.2",
   "description": "OmniRoute OpenAI-compatible provider for Pi Agent",
   "type": "module",
   "main": "src/index.js",

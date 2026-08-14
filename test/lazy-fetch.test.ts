@@ -71,6 +71,20 @@ test("refreshModels 成功时填充缓存", async () => {
   assert.equal(models[0].baseUrl, OMNIROUTE_DEFAULT_BASE_URL);
 });
 
+test("refreshModels 使用 omniroute.json 中的 baseUrl（优先于默认值）", async () => {
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(join(process.env.PI_AGENT_DIR!, "omniroute.json"), JSON.stringify({ baseUrl: "https://route.ai.philogag.com/v1" }));
+  let fetchedUrl: string | undefined;
+  mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    fetchedUrl = String(input);
+    return okResponse([{ id: "gpt-4o" }]);
+  });
+  await entry(mockPi());
+  await capturedProvider!.refreshModels!(refreshCtx());
+  assert.equal(fetchedUrl, "https://route.ai.philogag.com/v1/models");
+  assert.equal(capturedProvider!.getModels()[0].baseUrl, "https://route.ai.philogag.com/v1");
+});
+
 test("refreshModels 非 2xx 时错误冒泡", async () => {
   mock.method(globalThis, "fetch", async () => ({ ok: false, status: 401 }) as Response);
   await entry(mockPi());
@@ -99,6 +113,61 @@ test("refreshModels 失败后保留旧列表（后续读取命中缓存）", asy
   fetchMock.mock.mockImplementation(async () => ({ ok: false, status: 500 }) as Response);
   await assert.rejects(capturedProvider!.refreshModels!(refreshCtx()), /500/);
   assert.equal(capturedProvider!.getModels().length, 1); // 旧列表保留
+});
+
+test("refreshModels 0.84.1 契约：stored 先发布，allowNetwork=false 时不再请求网络", async () => {
+  // pi-ai 0.84.1 的 context：{ stored, publish, allowNetwork:false, signal } —
+  // 应直接发布 stored 中的模型，且不得触发 fetch。
+  const fetchMock = mock.method(globalThis, "fetch", async () => okResponse([]));
+  await entry(mockPi());
+
+  const storedModels = [
+    { id: "cached-1", provider: "omniroute", baseUrl: "http://localhost:20128/v1" },
+    { id: "other-provider", provider: "anthropic", baseUrl: "http://x/v1" },
+  ];
+  let published: { update?: () => void } | undefined;
+  const ctx = {
+    stored: { models: storedModels },
+    allowNetwork: false,
+    publish: async (publication: { update?: () => void }) => {
+      published = publication;
+      return true;
+    },
+    signal: new AbortController().signal,
+  };
+
+  await capturedProvider!.refreshModels!(ctx as never);
+  assert.equal(fetchMock.mock.callCount(), 0, "offline restore must not hit the network");
+  assert.ok(published, "publish must be called with the restored catalog");
+  published!.update!();
+  assert.deepEqual(
+    capturedProvider!.getModels().map((m) => m.id),
+    ["cached-1"],
+    "only omniroute-provider models are restored",
+  );
+});
+
+test("refreshModels 0.84.1 契约：成功时通过 publish persist+update 发布新列表", async () => {
+  mock.method(globalThis, "fetch", async () => okResponse([{ id: "gpt-4o" }]));
+  await entry(mockPi());
+
+  let publication: { persist?: unknown; update?: () => void } | undefined;
+  const ctx = {
+    allowNetwork: true,
+    publish: async (p: { persist?: unknown; update?: () => void }) => {
+      publication = p;
+      return true;
+    },
+    signal: new AbortController().signal,
+  };
+
+  await capturedProvider!.refreshModels!(ctx as never);
+  assert.ok(publication, "publish must be called after a successful network refresh");
+  assert.ok(publication!.persist, "persist payload must be provided");
+  const persisted = publication!.persist as { models: Array<{ id: string }> };
+  assert.deepEqual(persisted.models.map((m) => m.id), ["gpt-4o"]);
+  publication!.update!();
+  assert.deepEqual(capturedProvider!.getModels().map((m) => m.id), ["gpt-4o"]);
 });
 
 test("extension factory registers both web tools without throwing", async () => {

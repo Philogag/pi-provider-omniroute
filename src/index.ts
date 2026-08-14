@@ -1,13 +1,12 @@
 // src/index.ts — pi extension entry
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions, RefreshModelsContext } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
-import { omnirouteApiKeyAuth, OMNIROUTE_DEFAULT_BASE_URL } from "./auth.ts";
-import { resolveStoredBaseUrl } from "./auth-credentials.ts";
+import { omnirouteApiKeyAuth } from "./auth.ts";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig } from "./tools/search-config.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
 import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
 import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
 import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
@@ -75,8 +74,9 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
 }
 
 export default async function (pi: ExtensionAPI) {
-  const storedBaseUrl = resolveStoredBaseUrl();
-  const baseUrl = storedBaseUrl ?? process.env.OMNIROUTE_BASE_URL ?? OMNIROUTE_DEFAULT_BASE_URL;
+  // Precedence: omniroute.json baseUrl → OMNIROUTE_BASE_URL env → legacy
+  // auth.json env (pre-omp-compat /login) → default.
+  const baseUrl = resolveOmnirouteBaseUrl();
 
   let models: OmnirouteModel[] = [];
 
@@ -86,11 +86,65 @@ export default async function (pi: ExtensionAPI) {
     baseUrl,
     auth: { apiKey: omnirouteApiKeyAuth() },
     getModels: () => models,
-    async refreshModels({ signal }) {
+    async refreshModels(context) {
+      const { signal } = context;
+      // pi-ai 0.84.1 passes {stored, publish, allowNetwork, credential, force, signal};
+      // pi-ai 0.83 passes {store, allowNetwork, force, signal}. Handle both, and
+      // tolerate bare {signal} (unit-test doubles).
+      const c = context as RefreshModelsContext & {
+        stored?: Readonly<{ models?: readonly OmnirouteModel[] }>;
+        publish?: (publication: {
+          persist?: { models: OmnirouteModel[]; checkedAt?: number } | null;
+          update?: () => void;
+        }) => Promise<boolean>;
+        store?: { read(): Promise<unknown>; write(entry: unknown): Promise<void> };
+      };
+      const allowNetwork = c.allowNetwork !== false; // undefined → network allowed (tests, 0.83 restore)
+      const publish = c.publish;
+      const store = c.store;
+
+      // Restore phase: publish the persisted catalog back into the sync list.
+      if (c.stored?.models) {
+        const restored = c.stored.models.filter((m) => m.provider === "omniroute");
+        if (publish) {
+          const ok = await publish({ update: () => { models = [...restored]; } });
+          if (!ok) return;
+        } else {
+          models = [...restored];
+        }
+      } else if (store && !allowNetwork) {
+        // 0.83-style restore-from-store on the offline phase.
+        try {
+          const entry = (await store.read()) as { models?: readonly OmnirouteModel[] } | undefined;
+          if (entry?.models) models = entry.models.filter((m) => m.provider === "omniroute");
+        } catch {
+          // Best-effort restore; keep current list on failure.
+        }
+      }
+
+      if (!allowNetwork || signal?.aborted) return;
+
       const res = await fetch(`${baseUrl}/models`, { signal });
       if (!res.ok) throw new Error(`OmniRoute /models failed: ${res.status}`);
       const { data } = (await res.json()) as { data: OmnirouteModelEntry[] };
-      models = data.map((m) => toOmnirouteModel(m, baseUrl));
+      const refreshed = data.map((m) => toOmnirouteModel(m, baseUrl));
+      if (signal?.aborted) return;
+
+      if (publish) {
+        await publish({
+          persist: { models: refreshed, checkedAt: Date.now() },
+          update: () => { models = refreshed; },
+        });
+      } else {
+        models = refreshed;
+        if (store) {
+          try {
+            await store.write({ models: refreshed, checkedAt: Date.now() });
+          } catch {
+            // Persistence is best-effort; the in-memory list is already updated.
+          }
+        }
+      }
     },
     stream: (
       model: OmnirouteModel,

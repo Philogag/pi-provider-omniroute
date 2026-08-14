@@ -7,6 +7,7 @@ import {
   resolveOmnirouteConfigPath,
   readOmnirouteConfig,
   writeOmnirouteConfig,
+  resolveOmnirouteBaseUrl,
 } from "../src/tools/search-config.ts";
 
 const origPiAgentDir = process.env.PI_AGENT_DIR;
@@ -162,6 +163,56 @@ test("readOmnirouteConfig: non-object fetch warns once but search is still read"
   }
   assert.equal(warns, 1, "exactly one warn for non-object fetch");
   assert.deepEqual(cfg, { search: { provider: "tavily-search" } });
+});
+
+test("readOmnirouteConfig: reads baseUrl string", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: "https://route.ai.philogag.com/v1" }));
+  assert.deepEqual(readOmnirouteConfig(), { baseUrl: "https://route.ai.philogag.com/v1" });
+});
+
+test("readOmnirouteConfig: non-string baseUrl warns once and stays unset", () => {
+  const seedPath = join(dir, "omniroute.json");
+  writeFileSync(seedPath, JSON.stringify({ baseUrl: 42 }));
+  const origWarn = console.warn;
+  let warns = 0;
+  console.warn = () => { warns += 1; };
+  let cfg: unknown;
+  try {
+    cfg = readOmnirouteConfig();
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warns, 1, "exactly one warn for non-string baseUrl");
+  assert.deepEqual(cfg, {});
+});
+
+test("resolveOmnirouteBaseUrl: omniroute.json baseUrl wins over env", () => {
+  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://route.ai.philogag.com/v1" }));
+  process.env.OMNIROUTE_BASE_URL = "https://env.example/v1";
+  try {
+    assert.equal(resolveOmnirouteBaseUrl(), "https://route.ai.philogag.com/v1");
+  } finally {
+    delete process.env.OMNIROUTE_BASE_URL;
+  }
+});
+
+test("resolveOmnirouteBaseUrl: falls back to env when no baseUrl in file", () => {
+  process.env.OMNIROUTE_BASE_URL = "https://env.example/v1";
+  try {
+    assert.equal(resolveOmnirouteBaseUrl(), "https://env.example/v1");
+  } finally {
+    delete process.env.OMNIROUTE_BASE_URL;
+  }
+});
+
+test("resolveOmnirouteBaseUrl: falls back to legacy auth.json env", () => {
+  writeFileSync(join(dir, "auth.json"), JSON.stringify({ omniroute: { type: "api_key", key: "k", env: { OMNIROUTE_BASE_URL: "https://legacy.example/v1" } } }));
+  assert.equal(resolveOmnirouteBaseUrl(), "https://legacy.example/v1");
+});
+
+test("resolveOmnirouteBaseUrl: default when nothing configured", () => {
+  assert.equal(resolveOmnirouteBaseUrl(), "http://localhost:20128/v1");
 });
 
 test("writeOmnirouteConfig: write failure (read-only dir) warns but does not throw", () => {

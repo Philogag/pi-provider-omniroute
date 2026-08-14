@@ -8,6 +8,8 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FETCH_PROVIDERS, normalizeFetchProvider } from "./web-fetch.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL } from "../auth.ts";
+import { resolveStoredBaseUrl } from "../auth-credentials.ts";
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -282,6 +284,7 @@ export function resolveOmnirouteConfigPath(): string {
 }
 
 export interface OmnirouteConfigShape {
+  readonly baseUrl?: string;
   readonly search?: { readonly provider?: string };
   readonly fetch?: { readonly provider?: string };
 }
@@ -308,7 +311,15 @@ export function readOmnirouteConfig(): OmnirouteConfigShape {
     return {};
   }
   const root = parsed as Record<string, unknown>;
-  const result: { search?: { provider: string }; fetch?: { provider: string } } = {};
+  const result: { baseUrl?: string; search?: { provider: string }; fetch?: { provider: string } } = {};
+  const rawBaseUrl = root["baseUrl"];
+  if (rawBaseUrl !== undefined) {
+    if (typeof rawBaseUrl === "string") {
+      result.baseUrl = rawBaseUrl;
+    } else {
+      console.warn(`[omniroute] ${path} \`baseUrl\` is not a string; treating as unset`);
+    }
+  }
   for (const key of ["search", "fetch"] as const) {
     const branch = root[key];
     if (branch === undefined) continue;
@@ -324,6 +335,17 @@ export function readOmnirouteConfig(): OmnirouteConfigShape {
     result[key] = { provider };
   }
   return result;
+}
+
+export function resolveOmnirouteBaseUrl(): string {
+  return (
+    readOmnirouteConfig().baseUrl ??
+    process.env.OMNIROUTE_BASE_URL ??
+    // Legacy: pre-omp-compat /login stored the base URL inside the auth.json
+    // credential env. Keep it as a fallback so existing setups don't break.
+    resolveStoredBaseUrl() ??
+    OMNIROUTE_DEFAULT_BASE_URL
+  );
 }
 
 export function writeOmnirouteConfig(provider: string | undefined, key: "search" | "fetch" = "search"): void {
