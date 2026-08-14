@@ -1,9 +1,25 @@
 {
-  "name": "pi-provider-omniroute",
+  "name": "@philogag/pi-provider-omniroute",
   "version": "0.0.2",
   "description": "OmniRoute OpenAI-compatible provider for Pi Agent",
   "type": "module",
   "main": "src/index.js",
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Philogag/pi-provider-omniroute.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "pi": {
     "extensions": [
       "src/index.ts"
@@ -11,7 +27,8 @@
   },
   "scripts": {
     "test": "node --test --experimental-strip-types 'test/**/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm test && npm run typecheck"
   },
   "author": "",
   "license": "MIT",
