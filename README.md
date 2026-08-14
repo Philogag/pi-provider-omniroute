@@ -34,8 +34,11 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
 ## Installation
 
 ```bash
-pi install git:github.com/Philogag/pi-provider-omniroute
+pi install npm:@philogag/pi-provider-omniroute
 ```
+
+> Development builds from source:
+> `pi install git:github.com/Philogag/pi-provider-omniroute`
 
 Then connect into your OmniRoute instance with `/login omniroute` and paste your API KEY and base URL
 

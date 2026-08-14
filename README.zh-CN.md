@@ -34,11 +34,14 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
 
 ## 安装
 
-使用 Pi 内置的安装器直接从 Git 仓库安装：
+使用 Pi 内置的安装器从 npm 安装：
 
 ```bash
-pi install git:github.com/Philogag/pi-provider-omniroute
+pi install npm:@philogag/pi-provider-omniroute
 ```
+
+> 从源码开发构建可使用：
+> `pi install git:github.com/Philogag/pi-provider-omniroute`
 
 下次启动 Pi 时会自动加载本扩展，无需额外配置。后续升级只需重新执行同一条命令。
 
