@@ -24,10 +24,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync package version to tag
-        # Tag is the source of truth (e.g. `0.0.2` or `v0.0.2`); npm accepts
-        # both. `--no-git-tag-version` avoids creating a nested commit/tag.
-        run: npm version "$GITHUB_REF_NAME" --no-git-tag-version
+      - name: Verify tag matches package version
+        # The tag is the release marker; the published version comes from
+        # package.json. Refuse to publish if they drift (npm version would
+        # error anyway on "Version not changed" for an equal version).
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json version $PKG" >&2
+            exit 1
+          fi
 
       - name: Test and typecheck
         run: npm test && npm run typecheck
