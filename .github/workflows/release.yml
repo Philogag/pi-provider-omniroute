@@ -7,6 +7,7 @@ on:
       - "[0-9]*"
 
 permissions:
+  id-token: write  # Required for OIDC trusted publishing
   contents: read
 
 jobs:
@@ -17,8 +18,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org/
+          node-version: "24"  # npm CLI >= 11.5.1 required for trusted publishing
+          registry-url: "https://registry.npmjs.org"
           cache: npm
 
       - name: Install dependencies
@@ -26,8 +27,7 @@ jobs:
 
       - name: Verify tag matches package version
         # The tag is the release marker; the published version comes from
-        # package.json. Refuse to publish if they drift (npm version would
-        # error anyway on "Version not changed" for an equal version).
+        # package.json. Refuse to publish if they drift.
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
@@ -39,7 +39,7 @@ jobs:
       - name: Test and typecheck
         run: npm test && npm run typecheck
 
-      - name: Publish to npm
+      - name: Publish to npm (OIDC)
+        # Trusted publishing: npm exchanges the GitHub OIDC token for a
+        # short-lived publish token. No NODE_AUTH_TOKEN needed.
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
