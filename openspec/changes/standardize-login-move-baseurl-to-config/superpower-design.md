@@ -1,14 +1,14 @@
 # superpower-design — standardize-login-move-baseurl-to-config
 
 > 深度技术设计。需求事实源：`openspec/changes/standardize-login-move-baseurl-to-config/`（proposal.md、design.md、specs/）。本文只做实现级设计，不重新定义需求。
-> 上游需求摘要（勿重写）：① `/login omniroute` 走 pi-ai 标准 api-key 流程（只提示 key，凭据不含 baseUrl）；② `omniroute.json` 的 `baseUrl` 字段成为唯一持久化点，解析优先级 配置文件 → `OMNIROUTE_BASE_URL` env → 默认值 `http://localhost:20128/v1`；③ 旧版 auth.json 遗留 baseUrl 启动时一次性迁移；④ `/omniroute-settings` 顶层菜单新增 Base URL 条目（校验/写入/空输入重置）；⑤ 提交后尽力刷新模型。
+> 上游需求摘要（勿重写）：① `/login omniroute` 走 pi-ai 标准 api-key 流程（只提示 key，凭据不含 baseUrl）；② `settings.json` 的 `pi-provider-omniroute` 块 `baseUrl` 字段成为唯一持久化点，解析优先级 配置块 → `OMNIROUTE_BASE_URL` env → 默认值 `http://localhost:20128/v1`；③ 旧 `omniroute.json`（baseUrl+search/fetch，成功后删除）与旧版 auth.json 遗留 baseUrl 启动时一次性迁移；④ `/omniroute-settings` 顶层菜单新增 Base URL 条目（校验/写入/空输入重置）；⑤ 提交后尽力刷新模型。
 > 已确认决策（用户批准）：启动一次性迁移 / 提交后尽力刷新 / 空输入=重置。
 
 ## 1. 目标与非目标
 
 **目标**
 - 消灭自造 auth 流程：login 只收集 key，删除非标准 `check` 与凭据 env 注入。
-- baseUrl 生命周期完全由配置文件驱动：读（已有）、写、重置、迁移、UI 编辑闭环。
+- baseUrl 生命周期完全由 `settings.json` 的 `pi-provider-omniroute` 块驱动：读（已有）、写、重置、迁移、UI 编辑闭环。
 - 修改 baseUrl 后同一会话内模型端点保持一致（尽力刷新）。
 - 所有行为可被单元测试覆盖，不依赖真实网络。
 
@@ -57,15 +57,16 @@ export const omnirouteApiKeyAuth = () =>
 
 `src/index.ts` provider 定义中 `auth: { apiKey: omnirouteApiKeyAuth() }` 调用方式不变（返回的 `ApiKeyAuth` 无 `check`，Models 缺省走 resolve 判断可用性）。
 
-### 3.2 baseUrl 解析链统一与配置文件写入（D2）
+### 3.2 baseUrl 解析链统一与配置块写入（D2）
 
-`src/tools/search-config.ts`：
+`src/tools/search-config.ts`（配置读写目标改为标准 `settings.json`：`$PI_AGENT_DIR/settings.json`）：
 
 ```ts
 export function writeOmnirouteBaseUrl(url: string | undefined): void
 ```
 
-- 复用现有读-改-写模式（`readFileSync` 保留未知键 → 设/删 `root.baseUrl` → `mkdirSync` + `writeFileSync(tmp, 0o600)` + `renameSync`）。
+- 复用现有读-改-写模式，目标文件改为 `settings.json`：`readFileSync` 完整读入 settings.json → 保留所有未知键（含 pi 自身管理的 packages/theme/subagents 等）→ 在 `root["pi-provider-omniroute"]` 块内设/删 `baseUrl` → `mkdirSync` + `writeFileSync(tmp, 0o600)` + `renameSync` 原子替换。
+- `readOmnirouteConfig()` 同样改为读 `settings.json` 的 `pi-provider-omniroute` 块（baseUrl/search/fetch；块不存在则返回空配置）。
 - `undefined` = 删除字段（重置语义）；字符串 = 原样写入（调用方负责已校验）。
 - 失败仅 `console.warn`（与 `writeOmnirouteConfig` 一致）。
 
@@ -79,7 +80,7 @@ return (
 );
 ```
 
-- 移除 `resolveStoredBaseUrl()` 回退项（legacy 只在迁移路径读取）。
+- 移除 `resolveStoredBaseUrl()` 回退项与旧 `omniroute.json` 文件读取（legacy 只在迁移路径读取）。
 
 新增纯函数（可单测）：
 
@@ -99,19 +100,20 @@ export function parseBaseUrlInput(raw: string): BaseUrlInputResult
 `src/tools/search-config.ts`：
 
 ```ts
-/** 返回迁移后的 legacy 值（已写入配置），未发生迁移返回 undefined。 */
-export function migrateLegacyBaseUrl(): string | undefined
+/** 返回迁移后的 baseUrl（已写入配置块）；未发生迁移返回 undefined。 */
+export function migrateLegacyConfig(): string | undefined
 ```
 
-- 条件：`readOmnirouteConfig().baseUrl === undefined` 且 `process.env.OMNIROUTE_BASE_URL` 未设置且 `resolveStoredBaseUrl() !== undefined`。
-- 动作：`writeOmnirouteBaseUrl(legacy)` → 返回 legacy。
-- 幂等：写入后配置字段存在，后续启动条件不满足，自然只迁移一次。
+- 条件：`readOmnirouteConfig().baseUrl === undefined` 且 `process.env.OMNIROUTE_BASE_URL` 未设置。
+- 源收集（按序，仅填补缺失字段）：① 旧 `omniroute.json`（`$PI_AGENT_DIR/omniroute.json`，若存在——其 `baseUrl`/`search`/`fetch` 并入配置块，仅当块内对应字段缺失；迁移成功后 `unlinkSync` 删除该文件，删除失败仅 warn）；② 旧版 `/login` 遗留 `resolveStoredBaseUrl()`（auth.json env，仅 baseUrl，且仅当①未提供 baseUrl）。
+- 动作：写入配置块 → 返回迁移后的 baseUrl（优先①的 baseUrl，否则②）。
+- 幂等：写入后配置字段存在，后续启动条件不满足，自然只迁移一次；写入失败不删旧文件，下次启动重试。
 
 `src/index.ts` session_start：
 
 ```ts
 pi.on?.("session_start", async (_ev, ctx) => {
-  const migrated = migrateLegacyBaseUrl();
+  const migrated = migrateLegacyConfig();
   if (migrated !== undefined) {
     baseUrl = migrated;
     await refreshOmnirouteModels(ctx);   // 尽力而为（见 3.5）
@@ -182,7 +184,7 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 }
 ```
 
-- 现状缺陷：当前模型非 omniroute 时只查 env/默认，漏掉配置文件——与新 spec "配置文件优先" 冲突。统一后符合 spec。
+- 现状缺陷：当前模型非 omniroute 时只查 env/默认，漏掉配置块——与新 spec "配置块优先" 冲突。统一后符合 spec。
 - 依赖环检查：`http.ts → search-config.ts → auth.ts`，search-config 不反向依赖 http.ts，无环。
 - 行为影响：omniroute 模型在册时 `ctx.model.baseUrl` 优先不变（模型级端点覆盖）；仅回退路径更完整。
 
@@ -191,7 +193,7 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 | 文件 | 变更 |
 | --- | --- |
 | `src/auth.ts` | 替换为 `envApiKeyAuth`；删 `promptBaseUrlWithRetry`/`MAX_URL_RETRIES`/`check`；保留 `validateAndNormalizeBaseUrl`、`OMNIROUTE_DEFAULT_BASE_URL` |
-| `src/tools/search-config.ts` | 新增 `writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`migrateLegacyBaseUrl`、`renderBaseUrlEditor`；`resolveOmnirouteBaseUrl` 去掉 legacy 回退；状态机加 `sub-base-url` 模式与 `initialBaseUrl`/`onCommitBaseUrl` |
+| `src/tools/search-config.ts` | 新增 `writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`migrateLegacyConfig`、`renderBaseUrlEditor`；配置读写改为 `settings.json` 的 `pi-provider-omniroute` 块（保未知键）；`resolveOmnirouteBaseUrl` 去掉 legacy 回退（含旧 omniroute.json）；状态机加 `sub-base-url` 模式与 `initialBaseUrl`/`onCommitBaseUrl` |
 | `src/index.ts` | `baseUrl` 改 `let`；session_start 迁移 + 刷新；settings 命令绑定 `resolveBaseUrl: () => baseUrl`、顶层第三条目、`refreshOmnirouteModels` |
 | `src/tools/http.ts` | `resolveBaseUrl` 回退改为 `resolveOmnirouteBaseUrl()` |
 | `src/auth-credentials.ts` | 保留（仅迁移读取源 `resolveStoredBaseUrl`） |
@@ -205,6 +207,8 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 | 输入空/纯空白 | 视为重置：删配置字段，回退 env/默认 |
 | 输入缺 `/v1` 后缀 | 合法（保留 console.warn 提示） |
 | 配置写入失败（目录/权限） | warn 后继续；内存 baseUrl 已更新；下次启动再迁移 |
+| 迁移写入失败 | 旧 `omniroute.json` **不删除**，告警后下次启动重试 |
+| 迁移成功 | 配置块写入成功 → 删除旧 `omniroute.json`（unlink 失败仅 warn） |
 | 迁移时 env 已设置 | 不迁移（env 本就优先） |
 | 迁移后刷新失败 | notify 提示下次会话刷新；本次会话模型端点自洽 |
 | 非 TUI 模式调用 settings | 行为不变（现有 G3 notify） |
@@ -219,10 +223,10 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 
 **新增纯函数单测**
 - `parseBaseUrlInput`：合法/非法/空/纯空白/`/v1` 缺失警告（不视为错误）。
-- `writeOmnirouteBaseUrl`（并入 `test/search-config-persistence.test.ts`）：设值、删值（undefined）、保留未知键、非法 JSON 兜底。
+- `writeOmnirouteBaseUrl`/`readOmnirouteConfig`（并入 `test/search-config-persistence.test.ts`）：设值、删值（undefined）、保留 settings.json 其他未知键（如 packages/theme）、块不存在时新建块、非法 JSON 兜底。
 
 **迁移（并入 `test/session-start-config.test.ts` 或新文件）**
-- 三条件满足 → 写入配置 + 返回 legacy；config 已有 → 不迁移；env 已设 → 不迁移；写入失败 → warn 不抛。
+- 三条件满足（配置块无 baseUrl、env 未设、有旧源）→ 写入配置块 + 返回迁移值；配置块已有 → 不迁移；env 已设 → 不迁移；旧 `omniroute.json` 存在 → 并入（含 search/fetch）并删除文件；旧 omniroute.json 与 auth.json 遗留并存时前者优先；写入失败 → warn 不抛、旧文件保留。
 
 **菜单状态机（`test/search-config-state-machine.test.ts` + `test/search-config-toplevel.test.ts`）**
 - 顶层三行（含 Base URL 预览）；激活 → `sub-base-url`；Input onSubmit 合法/空/非法三路；Esc 返回；commit 回调携带值/undefined。
@@ -241,6 +245,8 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 - [迁移时序：provider refreshModels 先于迁移执行] → session_start 迁移后主动尽力刷新兜底。
 - [Input 组件在状态机重复渲染时丢失光标] → editor 组件按模式缓存（复用 submenu 缓存模式）。
 - [auth-credentials.ts 删除风险] → 保留文件仅作迁移读取源，零删除。
+- [与 pi 自身并发写 settings.json（均罕见、用户触发）] → 写前读最新内容、只改本块、原子替换；pi 的 SettingsManager 写入深合并保留未知键，块在双方写入下存活。
+- [旧 omniroute.json 残留] → 仅迁移成功后删除；删除失败仅 warn 不影响功能。
 - [长 URL 撑破菜单] → 预览截断。
 
 ## 8. 开放问题

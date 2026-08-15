@@ -9,9 +9,9 @@ base-ref: 524f60e6d1bed033044c631bc889656af0c5ceca
 > **For agentic workers:** REQUIRED SUB-SKILL: 使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现本计划。步骤用 `- [ ]` 复选框跟踪。
 > 实现约束：必须 TDD（先写失败测试 → 运行确认失败 → 最小实现 → 运行确认通过 → 提交）。每个任务独立可测试、独立提交。
 
-**Goal:** 将 `/login omniroute` 改为 pi-ai 标准 api-key 流程（只提示 key），并把 baseUrl 的唯一持久化点迁移到 `omniroute.json`（解析链：配置文件 → `OMNIROUTE_BASE_URL` env → 默认值 `http://localhost:20128/v1`），启动时一次性迁移旧 auth.json 遗留 baseUrl，settings 菜单新增 Base URL 编辑，修改后尽力刷新模型。
+**Goal:** 将 `/login omniroute` 改为 pi-ai 标准 api-key 流程（只提示 key），并把 baseUrl 的唯一持久化点迁移到标准 `settings.json`（`$PI_AGENT_DIR/settings.json`）的 `pi-provider-omniroute` 块（解析链：配置块 → `OMNIROUTE_BASE_URL` env → 默认值 `http://localhost:20128/v1`），启动时一次性迁移旧 `omniroute.json`（成功后删除）与旧 auth.json 遗留 baseUrl，settings 菜单新增 Base URL 编辑，修改后尽力刷新模型。
 
-**Architecture:** login 凭据不再携带 baseUrl（删除自造 `check` 与 env 注入）；`src/tools/search-config.ts` 成为 baseUrl 读/写/解析的唯一模块（新增 `writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`migrateLegacyBaseUrl`）；`src/index.ts` 的 provider baseUrl 由 `const` 改 `let` 并随会话事件/菜单提交更新；菜单状态机新增 `sub-base-url` 模式（pi-tui `Input` 编辑器）；工具侧回退链统一走 `resolveOmnirouteBaseUrl()`。
+**Architecture:** login 凭据不再携带 baseUrl（删除自造 `check` 与 env 注入）；`src/tools/search-config.ts` 成为 baseUrl 读/写/解析的唯一模块（配置读写收敛到 `settings.json` 的 `pi-provider-omniroute` 块，新增 `writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`migrateLegacyConfig`）；`src/index.ts` 的 provider baseUrl 由 `const` 改 `let` 并随会话事件/菜单提交更新；菜单状态机新增 `sub-base-url` 模式（pi-tui `Input` 编辑器）；工具侧回退链统一走 `resolveOmnirouteBaseUrl()`。
 
 **Tech Stack:** TypeScript (ESM, Node ≥22.6, `--experimental-strip-types`)、`node:test` + `node:assert/strict`、pi-ai 0.84.2（`envApiKeyAuth`）、pi-tui（`Input`/`SelectList`/`Container`）、pi-coding-agent（`ExtensionContext.modelRegistry.refresh`）。**无新增依赖。**
 
@@ -19,12 +19,13 @@ base-ref: 524f60e6d1bed033044c631bc889656af0c5ceca
 
 ## Global Constraints
 
-- 解析优先级（spec B1）：配置文件 `omniroute.json` 的 `baseUrl` → `OMNIROUTE_BASE_URL` env → 默认值 `OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/v1"`。旧 auth.json 只在一次性迁移路径读取，`resolveOmnirouteBaseUrl` 不再回退 legacy。
+- 解析优先级（spec B1）：`settings.json` 的 `pi-provider-omniroute` 块 `baseUrl` → `OMNIROUTE_BASE_URL` env → 默认值 `OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/v1"`。旧 auth.json 与旧 `omniroute.json` 只在一次性迁移路径读取，`resolveOmnirouteBaseUrl` 不再回退 legacy。
+- 配置存储：读写 `$PI_AGENT_DIR/settings.json`（默认 `~/.pi/agent/settings.json`）的 `pi-provider-omniroute` 块——读时保留其余键，写时深合并（**必须保留 pi 自身管理的 packages/theme/subagents 等未知键**）。
 - login 只提示 secret key（凭据不含 baseUrl / env / check）。
 - 校验规则复用 `validateAndNormalizeBaseUrl`（空/空白→默认值、仅 http(s)、缺 `/v1` 后缀 console.warn 但合法）。
-- 空输入 = 重置（删除配置文件 `baseUrl` 字段，回退 env/默认）。
+- 空输入 = 重置（删除配置块 `baseUrl` 字段，回退 env/默认）。
 - 提交 baseUrl 后尽力刷新：`ctx.modelRegistry.refresh({ providers: ["omniroute"], force: true })`，失败 console.warn + notify（不抛）。
-- 配置文件原子写：tmp + `renameSync`，`mode: 0o600`，保留未知根键，失败仅 `console.warn`。
+- 配置文件原子写（目标 `settings.json`）：tmp + `renameSync`，`mode: 0o600`，读最新内容、只改 `pi-provider-omniroute` 块、保留所有未知根键，失败仅 `console.warn`。
 - 测试/类型检查命令：`npm test`（`node --test --experimental-strip-types 'test/**/*.test.ts'`）、`npm run typecheck`（tsc --noEmit，tsconfig 未开 noUnusedLocals）。
 - 无新增依赖；不修改 `validateAndNormalizeBaseUrl` 与默认值；不删除 `src/auth-credentials.ts`（迁移读取源）。
 - 已核实 API：pi-ai 0.84.2 主入口导出 `envApiKeyAuth(name: string, envVars: string[])`；pi-tui `Input`：`onSubmit(value)`（触发键 = `"\n"` 或 `tui.input.submit` 绑定）、`onEscape()`（触发键 = `tui.select.cancel` 绑定，即 `"\x1b"`）、`setValue/getValue/focused`、`handleInput(data)` 对无控制字符的字符串整体插入；SelectList 选中触发键 `"\r"`。
@@ -178,35 +179,52 @@ git commit -m "refactor: standard login flow via envApiKeyAuth (no baseUrl/env i
 ### Task 2: baseUrl 配置写入/解析原语（search-config.ts）
 
 **Files:**
-- Modify: `src/tools/search-config.ts`（`writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`BaseUrlInputResult`、`resolveOmnirouteBaseUrl` 去 legacy）
-- Modify: `test/search-config-persistence.test.ts`（新增用例 + 替换 legacy 回退用例）
+- Modify: `src/tools/search-config.ts`（`readOmnirouteConfig`/`writeOmnirouteConfig`/`resolveOmnirouteConfigPath` 改为 `settings.json` 的 `pi-provider-omniroute` 块；新增 `writeOmnirouteBaseUrl`、`parseBaseUrlInput`、`BaseUrlInputResult`；`resolveOmnirouteBaseUrl` 去 legacy）
+- Modify: `test/search-config-persistence.test.ts`（更新既有 omniroute.json 相关用例为 settings.json 块 + 新增用例 + 替换 legacy 回退用例）
 
 **Interfaces:**
-- Consumes: `validateAndNormalizeBaseUrl`、`OMNIROUTE_DEFAULT_BASE_URL` from `../auth.ts`；既有 `readOmnirouteConfig`/`writeOmnirouteConfig` 的读-改-写原子写模式；`resolveStoredBaseUrl` from `../auth-credentials.ts`（本任务内仅从 `resolveOmnirouteBaseUrl` 移除引用，`migrateLegacyBaseUrl` 在 Task 3 使用它）
+- Consumes: `validateAndNormalizeBaseUrl`、`OMNIROUTE_DEFAULT_BASE_URL` from `../auth.ts`；既有读-改-写原子写模式；`resolveStoredBaseUrl` from `../auth-credentials.ts`（本任务内仅从 `resolveOmnirouteBaseUrl` 移除引用，`migrateLegacyConfig` 在 Task 3 使用它）
 - Produces:
-  - `export function writeOmnirouteBaseUrl(url: string | undefined): void` —— 设/删 `root.baseUrl`（`undefined` = 删除），原子写，保留未知键，失败 warn 不抛
+  - `export function resolveAgentSettingsPath(): string` —— 返回 `$PI_AGENT_DIR/settings.json`（或 `~/.pi/agent/settings.json`）；替换原 `resolveOmnirouteConfigPath`（rename，行为改为指向 settings.json）
+  - `export function readOmnirouteConfig(): OmnirouteConfig` —— 读 `settings.json` 的 `pi-provider-omniroute` 块（`baseUrl`/`search`/`fetch`；块不存在返回空配置）
+  - `export function writeOmnirouteConfig(provider, key)` —— 同样写入块（`root["pi-provider-omniroute"][field]`），保留所有未知根键
+  - `export function writeOmnirouteBaseUrl(url: string | undefined): void` —— 设/删 `root["pi-provider-omniroute"].baseUrl`（`undefined` = 删除），原子写，保留未知键（含 pi 自身键），失败 warn 不抛
   - `export type BaseUrlInputResult = { ok: true; value: string | undefined } | { ok: false; error: string }`
   - `export function parseBaseUrlInput(raw: string): BaseUrlInputResult` —— `trim()===""` → `{ok:true,value:undefined}`；否则 `validateAndNormalizeBaseUrl` 成功 → `{ok:true,value:normalized}`、抛错 → `{ok:false,error:err.message}`
   - `resolveOmnirouteBaseUrl()` 行为变化：`config.baseUrl ?? env.OMNIROUTE_BASE_URL ?? OMNIROUTE_DEFAULT_BASE_URL`（**删除 legacy 回退**）
 
 - [ ] **Step 1: 写失败测试（追加到 test/search-config-persistence.test.ts）**
 
-在既有 `beforeEach`（临时 `PI_AGENT_DIR`）下追加：
+在既有 `beforeEach`（临时 `PI_AGENT_DIR`）下追加（并更新既有直接读写 `omniroute.json` 的用例为 settings.json 块格式）：
 ```ts
 import { writeOmnirouteBaseUrl, parseBaseUrlInput } from "../src/tools/search-config.ts"; // 追加到现有 import
 
-test("writeOmnirouteBaseUrl: writes baseUrl into config file", () => {
+const SETTINGS = (block: Record<string, unknown>) => JSON.stringify({ packages: ["npm:@philogag/pi-provider-omniroute"], theme: "dark", "pi-provider-omniroute": block }, null, 2) + "\n";
+
+function settingsPath() { return join(dir, "settings.json"); }
+
+test("writeOmnirouteBaseUrl: writes baseUrl into the pi-provider-omniroute block of settings.json", () => {
   writeOmnirouteBaseUrl("https://route.example/v1");
-  const out = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
-  assert.deepEqual(out, { baseUrl: "https://route.example/v1" });
+  const out = JSON.parse(readFileSync(settingsPath(), "utf8"));
+  assert.deepEqual(out["pi-provider-omniroute"], { baseUrl: "https://route.example/v1" });
+  assert.ok(Array.isArray(out.packages), "settings.json root keys preserved");
 });
 
-test("writeOmnirouteBaseUrl: undefined removes baseUrl and preserves other keys", () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://x/v1", search: { provider: "tavily-search" } }));
+test("writeOmnirouteBaseUrl: undefined removes block.baseUrl and preserves other root keys", () => {
+  writeFileSync(settingsPath(), SETTINGS({ baseUrl: "https://x/v1", search: { provider: "tavily-search" } }));
   writeOmnirouteBaseUrl(undefined);
-  const out = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
-  assert.equal(out.baseUrl, undefined);
-  assert.deepEqual(out.search, { provider: "tavily-search" });
+  const out = JSON.parse(readFileSync(settingsPath(), "utf8"));
+  assert.equal(out["pi-provider-omniroute"].baseUrl, undefined);
+  assert.deepEqual(out["pi-provider-omniroute"].search, { provider: "tavily-search" });
+  assert.deepEqual(out.packages, ["npm:@philogag/pi-provider-omniroute"], "packages key preserved");
+});
+
+test("writeOmnirouteBaseUrl: creates the block when settings.json exists without it", () => {
+  writeFileSync(settingsPath(), JSON.stringify({ theme: "dark" }, null, 2));
+  writeOmnirouteBaseUrl("https://route.example/v1");
+  const out = JSON.parse(readFileSync(settingsPath(), "utf8"));
+  assert.deepEqual(out["pi-provider-omniroute"], { baseUrl: "https://route.example/v1" });
+  assert.equal(out.theme, "dark");
 });
 
 test("writeOmnirouteBaseUrl: round-trips through readOmnirouteConfig", () => {
@@ -307,7 +325,7 @@ export function parseBaseUrlInput(raw: string): BaseUrlInputResult {
 }
 
 export function writeOmnirouteBaseUrl(url: string | undefined): void {
-  const path = resolveOmnirouteConfigPath();
+  const path = resolveAgentSettingsPath();
   const tmp = path + ".tmp";
   let root: Record<string, unknown> = {};
   try {
@@ -321,11 +339,13 @@ export function writeOmnirouteBaseUrl(url: string | undefined): void {
       console.warn(`[omniroute] failed to read ${path} before write: ${(err as Error).message}`);
     }
   }
+  const block = (root["pi-provider-omniroute"] ?? {}) as Record<string, unknown>;
   if (url === undefined) {
-    delete root.baseUrl;
+    delete block.baseUrl;
   } else {
-    root.baseUrl = url;
+    block.baseUrl = url;
   }
+  root["pi-provider-omniroute"] = block;
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(tmp, JSON.stringify(root, null, 2) + "\n", { mode: 0o600 });
@@ -336,6 +356,7 @@ export function writeOmnirouteBaseUrl(url: string | undefined): void {
   }
 }
 ```
+（配套：`resolveAgentSettingsPath()` = 返回 `$PI_AGENT_DIR/settings.json`（或 `~/.pi/agent/settings.json`）；`readOmnirouteConfig()` 改读 `root["pi-provider-omniroute"]` 块（块不存在返回空配置）；`writeOmnirouteConfig(provider, key)` 同写入块字段；`resolveOmnirouteBaseUrl()` 删除 legacy 回退。）
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -351,10 +372,10 @@ git commit -m "feat: baseUrl config write/parse primitives; drop legacy fallback
 
 ---
 
-### Task 3: 一次性迁移 + 提交后尽力刷新
+### Task 3: 一次性迁移（双源：旧 omniroute.json + auth.json）+ 提交后尽力刷新
 
 **Files:**
-- Modify: `src/tools/search-config.ts`（`migrateLegacyBaseUrl`）
+- Modify: `src/tools/search-config.ts`（`migrateLegacyConfig`）
 - Modify: `src/index.ts`（`const baseUrl` → `let baseUrl`；`session_start` 迁移 + 刷新；新增 `refreshOmnirouteModels`）
 - Create: `test/migration-config.test.ts`
 - Modify: `test/session-start-config.test.ts`（sessionCtx 补 `refresh` stub）
@@ -362,9 +383,9 @@ git commit -m "feat: baseUrl config write/parse primitives; drop legacy fallback
 **Interfaces:**
 - Consumes: `writeOmnirouteBaseUrl`（Task 2）、`resolveStoredBaseUrl` from `../auth-credentials.ts`、`readOmnirouteConfig`（既有）、`normalizeFetchProvider`（既有）
 - Produces:
-  - `export function migrateLegacyBaseUrl(): string | undefined` —— 仅当 `readOmnirouteConfig().baseUrl === undefined` 且 `process.env.OMNIROUTE_BASE_URL` 未设置且 `resolveStoredBaseUrl() !== undefined` 时：`writeOmnirouteBaseUrl(legacy)` 并返回 legacy；否则 `undefined`。幂等。
+  - `export function migrateLegacyConfig(): string | undefined` —— 仅当 `readOmnirouteConfig().baseUrl === undefined` 且 `process.env.OMNIROUTE_BASE_URL` 未设置时执行迁移。源①：旧 `omniroute.json`（`$PI_AGENT_DIR/omniroute.json`，存在则读；其 `baseUrl`/`search`/`fetch` 并入配置块——仅填补块内缺失字段；迁移成功后 `unlinkSync` 删除该文件，删除失败仅 warn）。源②：`resolveStoredBaseUrl()`（auth.json legacy env，仅 baseUrl，仅当源①未提供 baseUrl）。写入配置块后返回迁移后的 baseUrl；否则 `undefined`。幂等。
   - `src/index.ts` 内 `async function refreshOmnirouteModels(ctx: ExtensionContext): Promise<void>` —— try `ctx.modelRegistry.refresh({ providers: ["omniroute"], force: true })`；catch → console.warn + 尽力 `ctx.ui.notify("Base URL 已更新，模型将在下次会话刷新", "info")`（notify 再包一层 try，测试 ctx 可能无 ui）
-- 依赖变化：`src/index.ts` 需新增 `import type { ExtensionContext } from "@earendil-works/pi-coding-agent"` 与 `import { migrateLegacyBaseUrl } from "./tools/search-config.ts"`
+- 依赖变化：`src/index.ts` 需新增 `import type { ExtensionContext } from "@earendil-works/pi-coding-agent"` 与 `import { migrateLegacyConfig } from "./tools/search-config.ts"`
 
 - [ ] **Step 1: 写失败测试（test/migration-config.test.ts）**
 
@@ -374,7 +395,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { migrateLegacyBaseUrl, readOmnirouteConfig } from "../src/tools/search-config.ts";
+import { migrateLegacyConfig, readOmnirouteConfig } from "../src/tools/search-config.ts";
 
 const origPiAgentDir = process.env.PI_AGENT_DIR;
 const origEnv = process.env.OMNIROUTE_BASE_URL;
@@ -396,53 +417,92 @@ function seedLegacy(url: string) {
   writeFileSync(join(dir, "auth.json"), JSON.stringify({ omniroute: { type: "api_key", key: "k", env: { OMNIROUTE_BASE_URL: url } } }));
 }
 
-test("migrateLegacyBaseUrl: migrates legacy auth.json baseUrl into config when nothing else set", () => {
+// 旧版配置文件：baseUrl + search + fetch 并存
+function seedOldConfig() {
+  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://legacy-cfg.example/v1", search: { provider: "tavily-search" }, fetch: { provider: "firecrawl" } }));
+}
+
+test("migrateLegacyConfig: migrates legacy auth.json baseUrl into block when nothing else set", () => {
   seedLegacy("https://legacy.example/v1");
-  const result = migrateLegacyBaseUrl();
+  const result = migrateLegacyConfig();
   assert.equal(result, "https://legacy.example/v1");
   assert.equal(readOmnirouteConfig().baseUrl, "https://legacy.example/v1");
 });
 
-test("migrateLegacyBaseUrl: no-op when config already has baseUrl", () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://cfg.example/v1" }));
-  seedLegacy("https://legacy.example/v1");
-  assert.equal(migrateLegacyBaseUrl(), undefined);
-  assert.equal(readOmnirouteConfig().baseUrl, "https://cfg.example/v1");
+test("migrateLegacyConfig: merges old omniroute.json (baseUrl+search+fetch) into block and deletes the file", () => {
+  seedOldConfig();
+  const result = migrateLegacyConfig();
+  assert.equal(result, "https://legacy-cfg.example/v1");
+  const cfg = readOmnirouteConfig();
+  assert.equal(cfg.baseUrl, "https://legacy-cfg.example/v1");
+  assert.deepEqual(cfg.search, { provider: "tavily-search" });
+  assert.deepEqual(cfg.fetch, { provider: "firecrawl" });
+  assert.throws(() => readFileSync(join(dir, "omniroute.json"), "utf8"), /ENOENT/, "old file deleted after successful migration");
 });
 
-test("migrateLegacyBaseUrl: no-op when OMNIROUTE_BASE_URL env is set", () => {
+test("migrateLegacyConfig: does not overwrite block fields already present; old file still deleted", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { search: { provider: "brave-search" } } }));
+  seedOldConfig();
+  const result = migrateLegacyConfig();
+  assert.equal(result, "https://legacy-cfg.example/v1");
+  const cfg = readOmnirouteConfig();
+  assert.equal(cfg.baseUrl, "https://legacy-cfg.example/v1");
+  assert.deepEqual(cfg.search, { provider: "brave-search" }, "existing block field wins");
+  assert.throws(() => readFileSync(join(dir, "omniroute.json"), "utf8"), /ENOENT/);
+});
+
+test("migrateLegacyConfig: falls back to auth.json legacy when old file has no baseUrl; old file still deleted", () => {
+  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ search: { provider: "serper-search" } }));
+  seedLegacy("https://legacy.example/v1");
+  const result = migrateLegacyConfig();
+  assert.equal(result, "https://legacy.example/v1");
+  assert.equal(readOmnirouteConfig().baseUrl, "https://legacy.example/v1");
+  assert.deepEqual(readOmnirouteConfig().search, { provider: "serper-search" });
+  assert.throws(() => readFileSync(join(dir, "omniroute.json"), "utf8"), /ENOENT/);
+});
+
+test("migrateLegacyConfig: no-op when block already has baseUrl", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
+  seedOldConfig();
+  seedLegacy("https://legacy.example/v1");
+  assert.equal(migrateLegacyConfig(), undefined);
+  assert.equal(readOmnirouteConfig().baseUrl, "https://cfg.example/v1");
+  assert.ok(readFileSync(join(dir, "omniroute.json"), "utf8"), "no migration → old file untouched");
+});
+
+test("migrateLegacyConfig: no-op when OMNIROUTE_BASE_URL env is set", () => {
   process.env.OMNIROUTE_BASE_URL = "https://env.example/v1";
   seedLegacy("https://legacy.example/v1");
-  assert.equal(migrateLegacyBaseUrl(), undefined);
+  assert.equal(migrateLegacyConfig(), undefined);
   assert.equal(readOmnirouteConfig().baseUrl, undefined);
 });
 
-test("migrateLegacyBaseUrl: returns undefined when no legacy credential", () => {
-  assert.equal(migrateLegacyBaseUrl(), undefined);
+test("migrateLegacyConfig: returns undefined when no legacy source", () => {
+  assert.equal(migrateLegacyConfig(), undefined);
   assert.deepEqual(readOmnirouteConfig(), {});
 });
 
-test("migrateLegacyBaseUrl: idempotent — second call does nothing", () => {
+test("migrateLegacyConfig: idempotent — second call does nothing", () => {
   seedLegacy("https://legacy.example/v1");
-  migrateLegacyBaseUrl();
-  assert.equal(migrateLegacyBaseUrl(), undefined);
+  migrateLegacyConfig();
+  assert.equal(migrateLegacyConfig(), undefined);
 });
 
-test("migrateLegacyBaseUrl: write failure warns but does not throw, still returns legacy (retry next startup)", () => {
-  seedLegacy("https://legacy.example/v1");
-  writeOmnirouteBaseUrl("https://seed.example/v1"); // 先确保可写内容存在
-  chmodSync(dir, 0o500);
+test("migrateLegacyConfig: old file kept on write failure (retry next startup)", () => {
+  seedOldConfig();
+  chmodSync(dir, 0o500); // settings.json 写入将失败
   const origWarn = console.warn;
   console.warn = () => {};
   try {
-    // 直接调用写失败路径：由于 config 已有 baseUrl 会走 no-op；此处构造写失败需先删除 baseUrl
-    assert.equal(migrateLegacyBaseUrl(), undefined);
+    const result = migrateLegacyConfig();
+    assert.equal(result, "https://legacy-cfg.example/v1", "returns migrated value; in-memory state carries the session");
   } finally {
     console.warn = origWarn;
     chmodSync(dir, 0o700);
   }
-});
-```
+  const oldCfg = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
+  assert.equal(oldCfg.baseUrl, "https://legacy-cfg.example/v1", "old file NOT deleted when migration write failed");
+});```
 （注：最后一个用例说明写失败场景 —— 更直接的构造是手动调 `writeOmnirouteBaseUrl` 到只读目录断言 warn 不抛，Task 2 已覆盖；迁移函数本身在写失败时仍返回 legacy，由 session 内存态兜底，下次启动重试。如 chmod 在部分平台不生效导致断言不稳，可删此用例，保留 Task 2 的写失败用例。）
 
 - [ ] **Step 2: 更新 test/session-start-config.test.ts 的 sessionCtx**
@@ -459,28 +519,57 @@ function sessionCtx(): unknown {
 - [ ] **Step 3: 运行测试确认失败**
 
 Run: `npm test -- test/migration-config.test.ts test/session-start-config.test.ts`
-Expected: 新文件用例 FAIL（`migrateLegacyBaseUrl` 不存在）
+Expected: 新文件用例 FAIL（`migrateLegacyConfig` 不存在）
 
 - [ ] **Step 4: 实现**
 
 `src/tools/search-config.ts` 新增：
 ```ts
-export function migrateLegacyBaseUrl(): string | undefined {
+export function migrateLegacyConfig(): string | undefined {
   if (readOmnirouteConfig().baseUrl !== undefined) return undefined;
   if (process.env.OMNIROUTE_BASE_URL) return undefined;
-  const legacy = resolveStoredBaseUrl();
-  if (legacy === undefined) return undefined;
-  writeOmnirouteBaseUrl(legacy);
-  return legacy;
+  let migrated: string | undefined;
+  const oldPath = resolveAgentSettingsPath().replace(/settings\.json$/, "omniroute.json");
+  // 更稳的旧文件路径：$PI_AGENT_DIR/omniroute.json（与 resolveAgentSettingsPath 同目录推导）
+  let oldCfg: Record<string, unknown> | undefined;
+  try {
+    const raw = readFileSync(oldPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldCfg = parsed as Record<string, unknown>;
+  } catch { /* 旧文件不存在或损坏 → 跳过源① */ }
+  const cur = readOmnirouteConfig();
+  const next: Record<string, unknown> = {};
+  if (cur.baseUrl === undefined && typeof oldCfg?.baseUrl === "string") next.baseUrl = oldCfg.baseUrl;
+  if (cur.search === undefined && oldCfg?.search !== undefined) next.search = oldCfg.search;
+  if (cur.fetch === undefined && oldCfg?.fetch !== undefined) next.fetch = oldCfg.fetch;
+  if (oldCfg !== undefined) {
+    try { unlinkSync(oldPath); } catch { /* 删除失败仅 warn */ }
+  }
+  migrated = next.baseUrl as string | undefined;
+  if (migrated === undefined) {
+    const legacy = resolveStoredBaseUrl();
+    if (legacy !== undefined) {
+      next.baseUrl = legacy;
+      migrated = legacy;
+    }
+  }
+  if (migrated === undefined) return undefined;
+  writeOmnirouteBaseUrl(migrated);
+  // search/fetch 若也迁移了，需一并持久化（writeOmnirouteConfig 不覆盖已有字段）
+  if (next.search !== undefined) writeOmnirouteConfig("search", next.search as never);
+  if (next.fetch !== undefined) writeOmnirouteConfig("fetch", next.fetch as never);
+  return migrated;
 }
 ```
-（重新引入 `import { resolveStoredBaseUrl } from "../auth-credentials.ts"`。）
+（重新引入 `import { resolveStoredBaseUrl } from "../auth-credentials.ts"`，并新增 `unlinkSync` import。实现时以 `src/tools/search-config.ts` 既有辅助函数为准：若已有 `agentDir()` 辅助，则 `oldPath = join(agentDir(), "omniroute.json")` 优先，避免字符串替换脆弱；测试只依赖行为不依赖实现。）
+
+注：若实现走"旧文件删除放在写入成功之后"更稳妥（先写块、成功后 unlink），请按此顺序实现——上述代码块为参考，行为契约以测试为准：迁移成功（块写入完成）→ 删除旧文件；写入失败 → 旧文件保留。
 
 `src/index.ts` 修改：
 ```ts
 // 模块顶部
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl, migrateLegacyBaseUrl } from "./tools/search-config.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl, migrateLegacyConfig } from "./tools/search-config.ts";
 
 // 模块级 baseUrl 改为 let（Task 4 菜单提交也会更新它）
 let baseUrl = resolveOmnirouteBaseUrl();
@@ -503,7 +592,7 @@ async function refreshOmnirouteModels(ctx: ExtensionContext): Promise<void> {
 `session_start` 钩子改为：
 ```ts
 pi.on?.("session_start", async (_ev: unknown, ctx: ExtensionContext) => {
-  const migrated = migrateLegacyBaseUrl();
+  const migrated = migrateLegacyConfig();
   if (migrated !== undefined) {
     baseUrl = migrated;
     await refreshOmnirouteModels(ctx);
@@ -523,7 +612,7 @@ Expected: 全部 PASS
 
 ```bash
 git add src/tools/search-config.ts src/index.ts test/migration-config.test.ts test/session-start-config.test.ts
-git commit -m "feat: one-time migration of legacy auth.json baseUrl + best-effort model refresh on session start"
+git commit -m "feat: one-time migration of legacy omniroute.json + auth.json baseUrl into settings block + best-effort model refresh"
 ```
 
 ---
@@ -721,7 +810,7 @@ test("/omniroute-settings: top menu renders Base URL row; base-url reset commit 
   const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-cmd-basurl-test-"));
   const origPi = process.env.PI_AGENT_DIR;
   process.env.PI_AGENT_DIR = tmpDir;
-  writeFileSync(join(tmpDir, "omniroute.json"), JSON.stringify({ baseUrl: "https://cfg.example/v1" }));
+  writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
   try {
     await entry(mockPi());
     const refreshCalls: Array<{ providers?: string[]; force?: boolean }> = [];
@@ -742,8 +831,8 @@ test("/omniroute-settings: top menu renders Base URL row; base-url reset commit 
     assert.match(wrapped.render(80).join("\n"), /enter=save/);
     wrapped.handleInput("\n");  // 空输入 = 重置
     assert.deepEqual(refreshCalls, [{ providers: ["omniroute"], force: true }], "reset commit must trigger model refresh");
-    const cfg = JSON.parse(readFileSync(join(tmpDir, "omniroute.json"), "utf8"));
-    assert.equal(cfg.baseUrl, undefined, "reset must remove baseUrl from config");
+    const cfg = JSON.parse(readFileSync(join(tmpDir, "settings.json"), "utf8"));
+    assert.equal(cfg["pi-provider-omniroute"].baseUrl, undefined, "reset must remove baseUrl from settings block");
   } finally {
     if (origPi === undefined) delete process.env.PI_AGENT_DIR;
     else process.env.PI_AGENT_DIR = origPi;
@@ -859,7 +948,7 @@ git commit -m "feat: Base URL editor in /omniroute-settings (sub-base-url mode) 
 
 - [ ] **Step 1: 写失败测试（更新 test/tools-http.test.ts）**
 
-文件顶部加临时 `PI_AGENT_DIR` 隔离（避免开发者本机 `~/.pi/agent/omniroute.json` 干扰回退断言）：
+文件顶部加临时 `PI_AGENT_DIR` 隔离（避免开发者本机 `~/.pi/agent/settings.json` 的 omniroute 块干扰回退断言）：
 ```ts
 import { before, after, beforeEach } from "node:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -885,14 +974,14 @@ test("resolveBaseUrl: prefers current omniroute model baseUrl", () => {
   assert.equal(resolveBaseUrl(ctx), "http://remote:9000/v1");
 });
 
-test("resolveBaseUrl: non-omniroute model falls back to config file baseUrl", () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://cfg.example/v1" }));
+test("resolveBaseUrl: non-omniroute model falls back to config block baseUrl", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
   const ctx = ctxWith({ provider: "anthropic", baseUrl: "http://other/v1" } as ExtensionContext["model"]);
   assert.equal(resolveBaseUrl(ctx), "https://cfg.example/v1");
 });
 
-test("resolveBaseUrl: config baseUrl wins over env", () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ baseUrl: "https://cfg.example/v1" }));
+test("resolveBaseUrl: config block baseUrl wins over env", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
   const before = process.env.OMNIROUTE_BASE_URL;
   process.env.OMNIROUTE_BASE_URL = "http://env-host/v1";
   try {
@@ -970,9 +1059,9 @@ git commit -m "fix: unify tool-side baseUrl fallback through resolveOmnirouteBas
 
 - [ ] **Step 1: 更新 README.md**
 
-- 配置章节：说明 baseUrl 现在由 `/omniroute-settings` 菜单的 Base URL 条目管理（或直接编辑 `~/.pi/agent/omniroute.json` 的 `baseUrl` 字段），解析优先级为配置文件 → `OMNIROUTE_BASE_URL` env → 默认 `http://localhost:20128/v1`；空输入即重置为默认。
+- 配置章节：说明 baseUrl 现在由 `/omniroute-settings` 菜单的 Base URL 条目管理（或直接编辑 `~/.pi/agent/settings.json` 的 `pi-provider-omniroute` 块 `baseUrl` 字段），解析优先级为配置块 → `OMNIROUTE_BASE_URL` env → 默认 `http://localhost:20128/v1`；空输入即重置为默认。配置块由扩展读写时保留 settings.json 其他键（packages/theme 等）。
 - login 章节：`/login omniroute` 只提示 API key，不再询问 baseUrl；key 解析优先级为已存凭据 → `OMNIROUTE_API_KEY` env。
-- 迁移说明：旧版（auth.json 内保存 baseUrl）会在下次启动时自动迁移到配置文件，一次完成，无需手动操作。
+- 迁移说明：旧版两处遗留会自动一次性迁移到 `settings.json` 的 `pi-provider-omniroute` 块（启动时）：旧 `omniroute.json`（baseUrl+search+fetch，迁移成功后自动删除）与旧 auth.json 内保存的 baseUrl；无需手动操作。
 - 同步更新 `README.zh-CN.md` 对应章节。
 
 - [ ] **Step 2: 全量回归**
@@ -1002,7 +1091,7 @@ git commit -m "docs: document standard login and config-managed baseUrl"
 **3. 类型一致性**
 - `parseBaseUrlInput`/`BaseUrlInputResult`：Task 2 定义，Task 4（编辑器/状态机）消费，形状一致 ✓
 - `writeOmnirouteBaseUrl(url: string | undefined)`：Task 2 定义，Task 3/4 消费 ✓
-- `migrateLegacyBaseUrl(): string | undefined`：Task 3 定义并用于 session_start ✓
+- `migrateLegacyConfig(): string | undefined`：Task 3 定义并用于 session_start（双源：旧 omniroute.json + auth.json；成功后删除旧文件）✓
 - `refreshOmnirouteModels(ctx: ExtensionContext): Promise<void>`：Task 3 定义，Task 4 的 `onCommitBaseUrl` 调用 ✓
 - `onCommitBaseUrl: (value: string | undefined) => void`：Task 3 之后的 `let baseUrl` 由 Task 4 的 commit 闭包更新；状态机 `current` 预填用 `deps.resolveBaseUrl()` 动态取值，避免重复状态同步 ✓
 - 顶层条目 value 命名 "base-url" 在 renderTopLevelMenu onSelect 与测试 `_sl.onSelect` 中一致 ✓

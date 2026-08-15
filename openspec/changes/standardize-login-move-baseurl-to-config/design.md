@@ -78,7 +78,9 @@ export const omnirouteApiKeyAuth = () =>
 - [尽力刷新失败（离线/接口变更），模型仍带旧 baseUrl] → 工具请求 `resolveBaseUrl` 优先 `ctx.model.baseUrl`；刷新失败时 notify 提示下次会话刷新，模型端点在本次会话内保持自洽（旧地址），避免新旧混用。
 - [迁移写入失败（目录不可写）] → `writeOmnirouteBaseUrl` 沿用现有 try/catch + warn 模式，失败仅告警，内存 baseUrl 仍更新；下次启动再次尝试迁移（配置字段仍未写入）。
 - [`modelRegistry.refresh` 语义在不同宿主版本可能不同（reload models.json vs 触发 provider refresh）] → 尽力而为 + notify 兜底；行为差异仅影响"本次会话内模型是否立即更新"，不影响配置正确性。
+- [扩展写 settings.json 与 pi 自身写 settings.json 并发（均罕见、用户触发）] → 写前读最新内容、只改 `pi-provider-omniroute` 块、原子替换整文件；pi 的 SettingsManager 写入同样保留未知键（`persistScopedSettings` 深合并），块内容在双方写入下都能存活。
 - [删除 auth-credentials.ts 可能影响其他引用] → 实现时 grep `resolveStoredBaseUrl` 确认引用面；保留该文件为迁移读取源则无风险。
+- [旧 `omniroute.json` 迁移后残留] → 迁移成功（配置块写入成功）才删除；删除用 `unlinkSync` 包 try/catch，失败仅告警不影响功能。
 
 ## Migration Plan
 
