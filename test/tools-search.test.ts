@@ -41,13 +41,13 @@ test("buildSearchBody: passes through optional fields when present", () => {
 });
 
 test("searchParamsSchema: provider enum rejects unknown value", async () => {
-  const { Value } = await import("@sinclair/typebox/value");
+  const { Value } = await import("typebox/value");
   const ok = Value.Check(searchParamsSchema, { query: "pi", provider: "nope-search" });
   assert.equal(ok, false);
 });
 
 test("searchParamsSchema: additionalProperties rejected at top level", async () => {
-  const { Value } = await import("@sinclair/typebox/value");
+  const { Value } = await import("typebox/value");
   const ok = Value.Check(searchParamsSchema, { query: "pi", bogus: 1 });
   assert.equal(ok, false);
 });

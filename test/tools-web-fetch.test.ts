@@ -39,12 +39,12 @@ test("buildFetchBody: passes through optional fields", () => {
 });
 
 test("fetchParamsSchema: invalid provider rejected", async () => {
-  const { Value } = await import("@sinclair/typebox/value");
+  const { Value } = await import("typebox/value");
   assert.equal(Value.Check(fetchParamsSchema, { url: "https://x", provider: "nope" }), false);
 });
 
 test("fetchParamsSchema: invalid depth rejected", async () => {
-  const { Value } = await import("@sinclair/typebox/value");
+  const { Value } = await import("typebox/value");
   assert.equal(Value.Check(fetchParamsSchema, { url: "https://x", depth: 7 }), false);
 });
 

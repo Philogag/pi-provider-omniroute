@@ -1,5 +1,5 @@
 // src/tools/search.ts
-import { Type, type Static } from "@sinclair/typebox";
+import { Type, type Static, type TLiteral, type TUnion } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { omnirouteRequest, resolveApiKey, resolveBaseUrl } from "./http.ts";
@@ -24,8 +24,8 @@ export const SEARCH_PROVIDERS = STATIC_FALLBACK_PROVIDERS;
 export const SEARCH_TYPES = ["web", "news"] as const;
 export const TIME_RANGES = ["any", "hour", "day", "week", "month", "year"] as const;
 
-function stringEnum<T extends readonly string[]>(values: T) {
-  return Type.Union(values.map((v) => Type.Literal(v)));
+function stringEnum<T extends readonly string[]>(values: T): TUnion<[TLiteral<T[number]>]> {
+  return Type.Union(values.map((v) => Type.Literal(v))) as TUnion<[TLiteral<T[number]>]>;
 }
 
 export const searchParamsSchema = Type.Object(

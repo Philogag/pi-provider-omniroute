@@ -105,7 +105,7 @@ export default async function (pi: ExtensionAPI) {
 
       // Restore phase: publish the persisted catalog back into the sync list.
       if (c.stored?.models) {
-        const restored = c.stored.models.filter((m) => m.provider === "omniroute");
+        const restored = (c.stored.models as readonly OmnirouteModel[]).filter((m) => m.provider === "omniroute");
         if (publish) {
           const ok = await publish({ update: () => { models = [...restored]; } });
           if (!ok) return;
