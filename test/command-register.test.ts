@@ -3,13 +3,25 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import entry from "../src/index.ts";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+
+// Fresh module instance per entry() call: /omniroute-settings registration is
+// guarded by module-level state (settingsCommandRegistered) that the harness
+// cannot reset, so a cache-busted dynamic import keeps tests order-independent
+// (freshPi() already zeroes the harness counters).
+let moduleSeq = 0;
+async function entry(pi: ExtensionAPI): Promise<void> {
+  const mod = (await import(`../src/index.ts?t=${++moduleSeq}`)) as {
+    default: (pi: ExtensionAPI) => Promise<void>;
+  };
+  await mod.default(pi);
+}
 
 const registeredCommands: Record<string, (args: string, ctx: ExtensionCommandContext) => Promise<void> | void> = {};
 let registerProviderCount = 0;
 let registerToolCount = 0;
+let registerCommandCalls = 0;
 let sessionStartHandler: ((...args: unknown[]) => unknown) | undefined;
 
 after(() => { mock.restoreAll(); });
@@ -32,6 +44,7 @@ function mockPi(): ExtensionAPI {
     registerProvider: () => { registerProviderCount++; },
     registerTool: () => { registerToolCount++; },
     registerCommand: (name: string, opts: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) => {
+      registerCommandCalls++;
       registeredCommands[name] = opts.handler;
     },
     on: (event: string, fn: (...args: unknown[]) => unknown) => {
@@ -40,28 +53,59 @@ function mockPi(): ExtensionAPI {
   } as unknown as ExtensionAPI;
 }
 
-test("entry registers /omniroute-settings command and provider + 2 tools", async () => {
-  await entry(mockPi());
+function freshPi(): ExtensionAPI {
+  registerProviderCount = 0;
+  registerToolCount = 0;
+  registerCommandCalls = 0;
+  for (const k of Object.keys(registeredCommands)) delete registeredCommands[k];
+  return mockPi();
+}
+
+test("entry registers provider + 2 tools but not /omniroute-settings (TUI-only)", async () => {
+  await entry(freshPi());
   assert.equal(registerProviderCount, 1);
   assert.equal(registerToolCount, 2);
-  assert.ok(registeredCommands["omniroute-settings"], "/omniroute-settings must be registered");
+  assert.equal(registeredCommands["omniroute-settings"], undefined, "command must not be registered before a TUI session start");
 });
 
-test("/omniroute-settings in non-TUI mode notifies without opening UI", async () => {
-  await entry(mockPi());
+test("TUI session_start registers /omniroute-settings exactly once (idempotent)", async () => {
+  await entry(freshPi());
+  assert.ok(sessionStartHandler, "harness must capture session_start");
+  await sessionStartHandler!({}, { mode: "tui" });
+  await sessionStartHandler!({}, { mode: "tui" });
+  assert.ok(registeredCommands["omniroute-settings"], "command must be registered after a TUI session start");
+  assert.equal(registerCommandCalls, 1, "repeated session_start must not re-register");
+});
+
+test("print/json/rpc session_start never registers /omniroute-settings", async () => {
+  for (const mode of ["print", "json", "rpc"]) {
+    await entry(freshPi());
+    await sessionStartHandler!({}, { mode });
+    assert.equal(registeredCommands["omniroute-settings"], undefined, `${mode} must not register the settings command`);
+    assert.equal(registerCommandCalls, 0, `${mode} must not call registerCommand`);
+  }
+});
+
+test("TUI-registered handler no longer notifies in non-TUI contexts", async () => {
+  await entry(freshPi());
+  await sessionStartHandler!({}, { mode: "tui" });
   let notified: { msg: string; type: string } | null = null;
   const ctx = {
     mode: "print",
-    ui: { notify: (msg: string, type?: "info" | "warning" | "error") => { notified = { msg, type: type ?? "info" }; } },
+    modelRegistry: { getApiKeyForProvider: async () => "test-key" },
+    ui: {
+      notify: (msg: string, type?: "info" | "warning" | "error") => { notified = { msg, type: type ?? "info" }; },
+      custom: async () => {},
+    },
   } as unknown as ExtensionCommandContext;
   await registeredCommands["omniroute-settings"]("", ctx);
-  assert.ok(notified, "must notify in non-TUI mode");
-  assert.match((notified as { msg: string } | null)!.msg, /TUI mode/i);
+  assert.equal(notified, null, "the non-TUI notify branch must be gone");
 });
 
 test("wrapped custom component re-resolves the state-machine component per render", async () => {
   initTheme(); // the TUI path renders via the passed-in UI theme; initTheme must run first
   await entry(mockPi());
+  await sessionStartHandler?.({}, { mode: "tui" });
 
   // Point the catalog fetch at an unreachable loopback port so it refuses
   // quickly and falls back to the built-in list instead of holding the loop.
@@ -134,6 +178,7 @@ test("/omniroute-settings: top menu renders Base URL row; base-url reset commit 
   writeFileSync(join(tmpDir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
   try {
     await entry(mockPi());
+    await sessionStartHandler?.({}, { mode: "tui" });
     const refreshCalls: Array<{ providers?: string[]; force?: boolean }> = [];
     let factory: ((tui: unknown, theme: unknown, kb: unknown, done: (r?: unknown) => void) => unknown) | undefined;
     const ctx = {

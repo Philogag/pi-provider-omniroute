@@ -130,6 +130,10 @@ pi --list-models | grep omniroute
 
 两个工具在模型未显式传入 `provider` 时，请求体不带该字段。如需为每次调用固定默认 provider，可打开内置设置菜单：
 
+> **注意：** `/omniroute-settings` 是仅 TUI 模式可用的命令。只有 Pi 以交互式 TUI
+> 运行时才会注册该命令 —— 在 `print` / `json` / `rpc` 会话中命令不存在（如需配置，
+> 请直接编辑 `$PI_AGENT_DIR/settings.json`，见[配置](#配置)）。
+
 ```text
 /omniroute-settings
 ```

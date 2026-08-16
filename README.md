@@ -90,6 +90,11 @@ Users who configured a custom base URL in a previous version will see it preserv
 
 Both tools send their requests without a `provider` field unless one is explicitly given by the model. To pin a default provider for every call, use the built-in settings menu:
 
+> **Note:** `/omniroute-settings` is a TUI-only command. It is registered only
+> when Pi runs in interactive TUI mode — in `print` / `json` / `rpc` sessions
+> the command does not exist (configure via `$PI_AGENT_DIR/settings.json`
+> instead, see [Configuration](#configuration)).
+
 ```text
 /omniroute-settings
 ```

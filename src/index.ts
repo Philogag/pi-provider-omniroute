@@ -17,6 +17,12 @@ setSearchConfigReader(() => currentConfigProvider);
 let currentFetchProvider: string | undefined = undefined;
 setFetchConfigReader(() => currentFetchProvider);
 
+// /omniroute-settings is TUI-only (its overlay needs ctx.ui.custom). The run
+// mode is only visible via session_start's ExtensionContext, so registration
+// happens on the first TUI session_start; repeated events (new/resume/fork)
+// must not re-register the command (spec R1/R2).
+let settingsCommandRegistered = false;
+
 type OmnirouteModel = Model<"openai-completions">;
 
 interface OmnirouteModelEntry {
@@ -219,70 +225,71 @@ export default async function (pi: ExtensionAPI) {
     const cfg = readOmnirouteConfig();
     currentConfigProvider = cfg.search?.provider;
     currentFetchProvider = normalizeFetchProvider(cfg.fetch?.provider);
+
+    // Register the TUI-only settings command only when running in TUI mode.
+    // print/json/rpc sessions must not expose /omniroute-settings (spec R1).
+    if (ctx.mode === "tui") registerSettingsCommand(pi);
   });
 
   // /omniroute-settings: two-level menu (top → Search provider submenu) rendered
-  // as a TUI overlay. In non-TUI modes we only notify (spec G3); the menu itself
-  // requires an API key, so we resolve it before opening any UI.
-  // Optional call: the test double for lazy-fetch registers only provider + tool
-  // (same reason `on` above is optional). Real hosts implement registerCommand.
-  pi.registerCommand?.("omniroute-settings", {
-    description: "OmniRoute settings (search / web-fetch provider)",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify("/omniroute-settings requires TUI mode", "error");
-        return;
-      }
-      // Verify the API key before opening the menu (spec G3).
-      const apiKey = await resolveApiKey(ctx);
-      if (!apiKey) {
-        ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.", "error");
-        return;
-      }
-      const sm = createMenuStateMachine({
-        resolveApiKey: () => resolveApiKey(ctx),
-        resolveBaseUrl: () => baseUrl,
-        initialCurrentProvider: currentConfigProvider,
-        initialFetchProvider: currentFetchProvider,
-        onCommitPersist: (provider) => {
-          currentConfigProvider = provider;
-          writeOmnirouteConfig(provider);
-        },
-        onCommitFetchPersist: (provider) => {
-          currentFetchProvider = provider;
-          writeOmnirouteConfig(provider, "fetch");
-        },
-        onCommitBaseUrl: (value) => {
-          writeOmnirouteBaseUrl(value);
-          baseUrl = value ?? resolveOmnirouteBaseUrl();
-          void refreshOmnirouteModels(ctx);
-        },
-        onClose: () => {},
-      });
-      await ctx.ui.custom((tui, theme, _kb, done) => {
-        // Resolve the component fresh on each frame/input so the wrapped render
-        // and handleInput always delegate to the current mode's component. The
-        // state machine's getComponent returns a fresh component reflecting the
-        // live mode ("top" vs "sub"), so capturing it once would freeze the
-        // wrapper to mode "top" and the provider submenu would never render.
-        const wrapped: Component = {
-          render: (w: number) => sm.getComponent(tui, theme).render(w),
-          invalidate: () => sm.getComponent(tui, theme).invalidate(),
-          handleInput: (data: string) => {
-            // Top-level Esc closes the overlay; submenu Esc is forwarded to the
-            // current mode's component which handles its own cancel/back.
-            if (data === "\x1b" && sm.mode() === "top") {
-              done(undefined);
-              return;
-            }
-            sm.getComponent(tui, theme).handleInput?.(data);
-            tui.requestRender();
+  // as a TUI overlay. Registered only on the first TUI session_start (see the
+  // session_start handler); the handler's non-TUI notify branch was removed
+  // because the command no longer exists outside TUI mode.
+  function registerSettingsCommand(pi: ExtensionAPI): void {
+    if (settingsCommandRegistered) return;
+    settingsCommandRegistered = true;
+    pi.registerCommand?.("omniroute-settings", {
+      description: "OmniRoute settings (search / web-fetch provider)",
+      handler: async (_args: string, ctx: ExtensionCommandContext) => {
+        // Verify the API key before opening the menu.
+        const apiKey = await resolveApiKey(ctx);
+        if (!apiKey) {
+          ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.", "error");
+          return;
+        }
+        const sm = createMenuStateMachine({
+          resolveApiKey: () => resolveApiKey(ctx),
+          resolveBaseUrl: () => baseUrl,
+          initialCurrentProvider: currentConfigProvider,
+          initialFetchProvider: currentFetchProvider,
+          onCommitPersist: (provider) => {
+            currentConfigProvider = provider;
+            writeOmnirouteConfig(provider);
           },
-        };
-        return wrapped;
-      });
-    },
-  });
+          onCommitFetchPersist: (provider) => {
+            currentFetchProvider = provider;
+            writeOmnirouteConfig(provider, "fetch");
+          },
+          onCommitBaseUrl: (value) => {
+            writeOmnirouteBaseUrl(value);
+            baseUrl = value ?? resolveOmnirouteBaseUrl();
+            void refreshOmnirouteModels(ctx);
+          },
+          onClose: () => {},
+        });
+        await ctx.ui.custom((tui, theme, _kb, done) => {
+          // Resolve the component fresh on each frame/input so the wrapped render
+          // and handleInput always delegate to the current mode's component. The
+          // state machine's getComponent returns a fresh component reflecting the
+          // live mode ("top" vs "sub"), so capturing it once would freeze the
+          // wrapper to mode "top" and the provider submenu would never render.
+          const wrapped: Component = {
+            render: (w: number) => sm.getComponent(tui, theme).render(w),
+            invalidate: () => sm.getComponent(tui, theme).invalidate(),
+            handleInput: (data: string) => {
+              // Top-level Esc closes the overlay; submenu Esc is forwarded to the
+              // current mode's component which handles its own cancel/back.
+              if (data === "\x1b" && sm.mode() === "top") {
+                done(undefined);
+                return;
+              }
+              sm.getComponent(tui, theme).handleInput?.(data);
+              tui.requestRender();
+            },
+          };
+          return wrapped;
+        });
+      },
+    });
+  }
 }
-
-

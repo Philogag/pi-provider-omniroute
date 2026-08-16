@@ -20,7 +20,7 @@
 
 ### Modified Capabilities
 
-无——归档变更（2026-08-16-standardize-login-move-baseurl-to-config）已封闭，其 spec 未包含非 TUI 通知需求（该行为仅存在于代码实现中，本次变更将其改为不注册）。
+- **`web-search-provider-config`**：删除非 TUI 下 `ctx.ui.notify` 提示场景，改为"非 TUI 模式命令不存在"（与 `settings-command-tui-gating` 一致）。
 
 ## Impact
 
