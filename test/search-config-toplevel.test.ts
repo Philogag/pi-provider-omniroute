@@ -15,9 +15,11 @@ function makeParams(overrides: Partial<TopLevelMenuParams> = {}): TopLevelMenuPa
   return {
     currentProvider: "tavily-search",
     fetchPreview: "Auto",
+    baseUrlPreview: "http://localhost:20128/v1",
     theme: fakeTheme,
     onActivateSearchProvider: () => {},
     onActivateFetchProvider: () => {},
+    onActivateBaseUrl: () => {},
     ...overrides,
   };
 }
@@ -64,6 +66,33 @@ test("renderTopLevelMenu: Enter on fetch row activates fetch provider", () => {
   const component = renderTopLevelMenu(params) as unknown as { _sl: { onSelect?: (item: { value: string; label: string }) => void } };
   component._sl.onSelect?.({ value: "fetch", label: "Web Fetch provider: Auto" });
   assert.equal(activated, "fetch");
+});
+
+test("renderTopLevelMenu: renders third row with Base URL preview", () => {
+  const params = makeParams({ currentProvider: "tavily-search", fetchPreview: "firecrawl", baseUrlPreview: "https://route.example/v1" });
+  const joined = renderTopLevelMenu(params).render(80).join("\n") as string;
+  assert.match(joined, /Base URL:\s+https:\/\/route\.example\/v1/);
+});
+
+test("renderTopLevelMenu: select on base-url row activates base-url editor", () => {
+  let activated = "";
+  const params = makeParams({
+    onActivateSearchProvider: () => { activated = "search"; },
+    onActivateFetchProvider: () => { activated = "fetch"; },
+    onActivateBaseUrl: () => { activated = "base-url"; },
+  });
+  const component = renderTopLevelMenu(params) as unknown as { _sl: { onSelect?: (item: { value: string }) => void } };
+  component._sl.onSelect?.({ value: "base-url" });
+  assert.equal(activated, "base-url");
+});
+
+test("renderTopLevelMenu: long baseUrl preview is truncated", () => {
+  const long = "https://" + "a".repeat(60) + "/v1";
+  const joined = renderTopLevelMenu(makeParams({ baseUrlPreview: long })).render(80).join("\n") as string;
+  // Assert on the Base URL row only (the full render is multiple 80-col lines).
+  const row = joined.split("\n").find((l) => l.includes("Base URL:")) ?? "";
+  assert.ok(row.length < 120, "truncated preview must stay short");
+  assert.match(row, /…/);
 });
 
 test("renderTopLevelMenu: Esc does not trigger activation, invokes onClose", () => {

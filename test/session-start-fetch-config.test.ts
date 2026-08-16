@@ -1,7 +1,8 @@
 // Verifies that src/index.ts wires session_start into the fetch tool's config
-// reader: on session start it reads omniroute.json's fetch.provider, normalizes
-// it, and makes webFetchTool's effective provider come from that persisted
-// config (when no explicit provider is passed).
+// reader: on session start it reads the `pi-provider-omniroute` block of
+// settings.json (fetch.provider), normalizes it, and makes webFetchTool's
+// effective provider come from that persisted config (when no explicit provider
+// is passed).
 import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -84,7 +85,7 @@ function sessionCtx(): unknown {
 }
 
 test("session_start: reads fetch.provider and webFetchTool uses it", async () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ fetch: { provider: "firecrawl" } }));
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { fetch: { provider: "firecrawl" } } }));
   await entry(mockPi());
   assert.ok(capturedSessionStart, "session_start hook must be registered");
   await capturedSessionStart!({}, sessionCtx() as never);
@@ -92,14 +93,14 @@ test("session_start: reads fetch.provider and webFetchTool uses it", async () =>
 });
 
 test("session_start: invalid fetch.provider id is normalized to auto", async () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ fetch: { provider: "foo" } }));
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { fetch: { provider: "foo" } } }));
   await entry(mockPi());
   await capturedSessionStart!({}, sessionCtx() as never);
   assert.equal(await effectiveProviderForFetch(), undefined);
 });
 
 test("session_start: fetch config does not leak into search tool", async () => {
-  writeFileSync(join(dir, "omniroute.json"), JSON.stringify({ fetch: { provider: "firecrawl" } }));
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { fetch: { provider: "firecrawl" } } }));
   await entry(mockPi());
   await capturedSessionStart!({}, sessionCtx() as never);
   // fetch.provider must NOT flow into the search tool's request body.

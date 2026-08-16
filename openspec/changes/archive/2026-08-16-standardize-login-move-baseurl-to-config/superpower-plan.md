@@ -28,7 +28,7 @@ base-ref: 524f60e6d1bed033044c631bc889656af0c5ceca
 - 配置文件原子写（目标 `settings.json`）：tmp + `renameSync`，`mode: 0o600`，读最新内容、只改 `pi-provider-omniroute` 块、保留所有未知根键，失败仅 `console.warn`。
 - 测试/类型检查命令：`npm test`（`node --test --experimental-strip-types 'test/**/*.test.ts'`）、`npm run typecheck`（tsc --noEmit，tsconfig 未开 noUnusedLocals）。
 - 无新增依赖；不修改 `validateAndNormalizeBaseUrl` 与默认值；不删除 `src/auth-credentials.ts`（迁移读取源）。
-- 已核实 API：pi-ai 0.84.2 主入口导出 `envApiKeyAuth(name: string, envVars: string[])`；pi-tui `Input`：`onSubmit(value)`（触发键 = `"\n"` 或 `tui.input.submit` 绑定）、`onEscape()`（触发键 = `tui.select.cancel` 绑定，即 `"\x1b"`）、`setValue/getValue/focused`、`handleInput(data)` 对无控制字符的字符串整体插入；SelectList 选中触发键 `"\r"`。
+- 已核实 API：pi-ai 0.83.0（已装）/0.84.2（兼容）主入口导出 `envApiKeyAuth(name: string, envVars: string[])`——login 只提示 secret；resolve = 已存凭据 key ?? 首个命中 env var ?? undefined，**透传 `credential.env`**（旧登录遗留 env 惰性无害：pi-ai 调用环境不消费 `OMNIROUTE_BASE_URL`，迁移后本扩展也不再读 credential.env）；无 check。pi-tui `Input`：`onSubmit(value)`（触发键 = `"\n"` 或 `tui.input.submit` 绑定）、`onEscape()`（触发键 = `tui.select.cancel` 绑定，即 `"\x1b"`）、`setValue/getValue/focused`、`handleInput(data)` 对无控制字符的字符串整体插入；SelectList 选中触发键 `"\r"`。
 
 ---
 
@@ -384,6 +384,7 @@ git commit -m "feat: baseUrl config write/parse primitives; drop legacy fallback
 - Consumes: `writeOmnirouteBaseUrl`（Task 2）、`resolveStoredBaseUrl` from `../auth-credentials.ts`、`readOmnirouteConfig`（既有）、`normalizeFetchProvider`（既有）
 - Produces:
   - `export function migrateLegacyConfig(): string | undefined` —— 仅当 `readOmnirouteConfig().baseUrl === undefined` 且 `process.env.OMNIROUTE_BASE_URL` 未设置时执行迁移。源①：旧 `omniroute.json`（`$PI_AGENT_DIR/omniroute.json`，存在则读；其 `baseUrl`/`search`/`fetch` 并入配置块——仅填补块内缺失字段；迁移成功后 `unlinkSync` 删除该文件，删除失败仅 warn）。源②：`resolveStoredBaseUrl()`（auth.json legacy env，仅 baseUrl，仅当源①未提供 baseUrl）。写入配置块后返回迁移后的 baseUrl；否则 `undefined`。幂等。
+  - **源②成功后清除遗留（最终评审 I1 修复）**：源②迁移且配置块写入确认落地后，调用 `stripStoredBaseUrlEnv()`（`auth-credentials.ts` 新增：从 auth.json 的 omniroute 凭据 env 删除 `OMNIROUTE_BASE_URL`，保留 apiKey 与其余 env 键、其他 provider；env 变空删除整个 env 字段；tmp+rename 原子写 0o600；失败仅 warn 返回 false）——保证用户重置 baseUrl 后下一次 session_start 不会把旧值重新迁移（spec B4 语义）。
   - `src/index.ts` 内 `async function refreshOmnirouteModels(ctx: ExtensionContext): Promise<void>` —— try `ctx.modelRegistry.refresh({ providers: ["omniroute"], force: true })`；catch → console.warn + 尽力 `ctx.ui.notify("Base URL 已更新，模型将在下次会话刷新", "info")`（notify 再包一层 try，测试 ctx 可能无 ui）
 - 依赖变化：`src/index.ts` 需新增 `import type { ExtensionContext } from "@earendil-works/pi-coding-agent"` 与 `import { migrateLegacyConfig } from "./tools/search-config.ts"`
 
@@ -502,7 +503,8 @@ test("migrateLegacyConfig: old file kept on write failure (retry next startup)",
   }
   const oldCfg = JSON.parse(readFileSync(join(dir, "omniroute.json"), "utf8"));
   assert.equal(oldCfg.baseUrl, "https://legacy-cfg.example/v1", "old file NOT deleted when migration write failed");
-});```
+});
+```
 （注：最后一个用例说明写失败场景 —— 更直接的构造是手动调 `writeOmnirouteBaseUrl` 到只读目录断言 warn 不抛，Task 2 已覆盖；迁移函数本身在写失败时仍返回 legacy，由 session 内存态兜底，下次启动重试。如 chmod 在部分平台不生效导致断言不稳，可删此用例，保留 Task 2 的写失败用例。）
 
 - [ ] **Step 2: 更新 test/session-start-config.test.ts 的 sessionCtx**
@@ -1036,6 +1038,7 @@ export function resolveBaseUrl(ctx: ExtensionContext): string {
 }
 ```
 删除 `import { OMNIROUTE_DEFAULT_BASE_URL } from "../auth.ts"`。依赖环检查：`http.ts → search-config.ts → auth.ts`，search-config 不反向依赖 http.ts，无环。
+> **更正（Task 5 review 确认）**：上述"无环"论断有误——实际存在良性环 `http.ts → search-config.ts → web-fetch.ts → http.ts`（search-config.ts:10 从 web-fetch.ts 导入 `FETCH_PROVIDERS`/`normalizeFetchProvider`；web-fetch.ts:5 从 http.ts 导入 `omnirouteRequest`/`resolveApiKey`/`resolveBaseUrl`）。良性原因：三个模块均无顶层代码在求值期读取环对方绑定（web-fetch 仅在工具执行体内用 http 导出；search-config 仅在 `buildFetchSelectItems`/`renderFetchSubmenu` 函数体内用 web-fetch 导出），无 TDZ 风险。副作用：`import http.ts` 现在会急切求值 search-config.ts 及其传递依赖图（pi-tui、auth.ts、auth-credentials.ts、web-fetch.ts），增加求值顺序耦合但无正确性风险。勿再重复"无环"断言。
 
 - [ ] **Step 4: 运行测试确认通过**
 

@@ -1,15 +1,15 @@
 // src/tools/search-config.ts
 // Catalog fetch + persistence + TUI renderers for the search provider config.
 
-import { Container, Loader, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
+import { Container, Input, Loader, SelectList, Text, type Component, type SelectItem } from "@earendil-works/pi-tui";
 import type { TUI } from "@earendil-works/pi-tui";
 import { DynamicBorder, getSelectListTheme, keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FETCH_PROVIDERS, normalizeFetchProvider } from "./web-fetch.ts";
-import { OMNIROUTE_DEFAULT_BASE_URL } from "../auth.ts";
-import { resolveStoredBaseUrl } from "../auth-credentials.ts";
+import { OMNIROUTE_DEFAULT_BASE_URL, validateAndNormalizeBaseUrl } from "../auth.ts";
+import { resolveStoredBaseUrl, stripStoredBaseUrlEnv } from "../auth-credentials.ts";
 
 export const STATIC_FALLBACK_PROVIDERS: readonly string[] = [
   "serper-search",
@@ -228,9 +228,11 @@ export function renderProviderSubmenu(params: ProviderSubmenuParams): Component 
 export interface TopLevelMenuParams {
   readonly currentProvider: string | undefined;
   readonly fetchPreview: string;                     // "Auto" or provider id
+  readonly baseUrlPreview: string;                   // current Base URL (truncated for display)
   readonly theme: Theme;                             // UI theme
   readonly onActivateSearchProvider: () => void;
   readonly onActivateFetchProvider: () => void;
+  readonly onActivateBaseUrl: () => void;
   readonly onClose?: () => void;                     // Esc at top closes the overlay
   readonly requestRender?: () => void;               // Pattern 1: repaint after input
 }
@@ -240,17 +242,86 @@ function previewForProvider(p: string | undefined): string {
   return p;
 }
 
+/** Truncate a long Base URL preview to `max` chars (with a trailing "…"). */
+export function truncatePreview(s: string, max = 48): string {
+  return s.length <= max ? s : s.slice(0, max) + "…";
+}
+
+export interface BaseUrlEditorParams {
+  readonly current: string;
+  readonly theme: Theme;
+  readonly onCommit: (value: string | undefined) => void;
+  readonly onCancel: () => void;
+  readonly requestRender?: () => void;
+  readonly resolveBaseUrlInput?: (raw: string) => BaseUrlInputResult;
+}
+
+/**
+ * Single-line Base URL editor used by the state machine's "sub-base-url" mode.
+ * Renders a Container with title, an Input prefilled with the current value,
+ * an error line (set on invalid submit) and a key hint. Input routing is done
+ * manually (a bare Container does not forward input). The Input instance is
+ * exposed as `_input` for unit tests.
+ */
+export function renderBaseUrlEditor(params: BaseUrlEditorParams): Component {
+  const { current, theme, onCommit, onCancel, requestRender } = params;
+  const resolve = params.resolveBaseUrlInput ?? parseBaseUrlInput;
+  const input = new Input();
+  input.setValue(current);
+  input.focused = true;
+  // Error line: created once and mutated via setText so it appears on re-render
+  // (children are fixed at construction time; a late addChild would not render).
+  const errorText = new Text("", 1, 0);
+
+  input.onSubmit = (value: string): void => {
+    const r = resolve(value);
+    if (r.ok) {
+      onCommit(r.value);
+    } else {
+      errorText.setText(theme.fg("warning", r.error));
+      requestRender?.();
+    }
+  };
+  input.onEscape = (): void => {
+    onCancel();
+  };
+
+  const container = new Container();
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+  container.addChild(new Text(theme.fg("accent", theme.bold("Base URL")), 1, 0));
+  container.addChild(input as unknown as Component);
+  container.addChild(errorText as unknown as Component);
+  container.addChild(new Text(theme.fg("dim", keyHint("tui.input.submit", "save") + " · " + keyHint("tui.select.cancel", "back")), 1, 0));
+  container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+  // A bare Container does not forward input; route keypresses to the Input.
+  (container as unknown as { handleInput: (data: string) => void }).handleInput = (data: string): void => {
+    input.handleInput(data);
+    requestRender?.();
+  };
+
+  // Expose the Input for unit tests.
+  (container as unknown as { _input: Input })._input = input;
+
+  return container as unknown as Component;
+}
+
+// --- Top-level menu ---
+
 export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
   const { currentProvider, fetchPreview, theme } = params;
   const preview = previewForProvider(currentProvider);
   const items: SelectItem[] = [
     { value: "search", label: `Search provider: ${preview}` },
     { value: "fetch", label: `Web Fetch provider: ${fetchPreview}` },
+    { value: "base-url", label: `Base URL: ${truncatePreview(params.baseUrlPreview)}` },
   ];
   const selectList = new SelectList(items, items.length, getSelectListTheme());
   selectList.onSelect = (item: SelectItem): void => {
     if (item.value === "fetch") {
       params.onActivateFetchProvider();
+    } else if (item.value === "base-url") {
+      params.onActivateBaseUrl();
     } else {
       params.onActivateSearchProvider();
     }
@@ -275,12 +346,12 @@ export function renderTopLevelMenu(params: TopLevelMenuParams): Component {
   return container as unknown as Component;
 }
 
-// --- omniroute.json persistence ---
+// --- settings.json persistence (pi-provider-omniroute block) ---
 
-export function resolveOmnirouteConfigPath(): string {
+export function resolveAgentSettingsPath(): string {
   const fromEnv = process.env.PI_AGENT_DIR;
   const base = fromEnv || join(homedir(), ".pi", "agent");
-  return join(base, "omniroute.json");
+  return join(base, "settings.json");
 }
 
 export interface OmnirouteConfigShape {
@@ -290,7 +361,7 @@ export interface OmnirouteConfigShape {
 }
 
 export function readOmnirouteConfig(): OmnirouteConfigShape {
-  const path = resolveOmnirouteConfigPath();
+  const path = resolveAgentSettingsPath();
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
@@ -311,8 +382,15 @@ export function readOmnirouteConfig(): OmnirouteConfigShape {
     return {};
   }
   const root = parsed as Record<string, unknown>;
+  const rawBlock = root["pi-provider-omniroute"];
+  if (rawBlock === undefined) return {};
+  if (!rawBlock || typeof rawBlock !== "object" || Array.isArray(rawBlock)) {
+    console.warn(`[omniroute] ${path} \`pi-provider-omniroute\` is not a plain object; treating as empty config`);
+    return {};
+  }
+  const block = rawBlock as Record<string, unknown>;
   const result: { baseUrl?: string; search?: { provider: string }; fetch?: { provider: string } } = {};
-  const rawBaseUrl = root["baseUrl"];
+  const rawBaseUrl = block["baseUrl"];
   if (rawBaseUrl !== undefined) {
     if (typeof rawBaseUrl === "string") {
       result.baseUrl = rawBaseUrl;
@@ -321,7 +399,7 @@ export function readOmnirouteConfig(): OmnirouteConfigShape {
     }
   }
   for (const key of ["search", "fetch"] as const) {
-    const branch = root[key];
+    const branch = block[key];
     if (branch === undefined) continue;
     if (!branch || typeof branch !== "object" || Array.isArray(branch)) {
       console.warn(`[omniroute] ${path} \`${key}\` field is not a plain object; treating as empty config`);
@@ -341,15 +419,12 @@ export function resolveOmnirouteBaseUrl(): string {
   return (
     readOmnirouteConfig().baseUrl ??
     process.env.OMNIROUTE_BASE_URL ??
-    // Legacy: pre-omp-compat /login stored the base URL inside the auth.json
-    // credential env. Keep it as a fallback so existing setups don't break.
-    resolveStoredBaseUrl() ??
     OMNIROUTE_DEFAULT_BASE_URL
   );
 }
 
 export function writeOmnirouteConfig(provider: string | undefined, key: "search" | "fetch" = "search"): void {
-  const path = resolveOmnirouteConfigPath();
+  const path = resolveAgentSettingsPath();
   const tmp = path + ".tmp";
   // Read current (preserve unknown keys)
   let root: Record<string, unknown> = {};
@@ -366,13 +441,22 @@ export function writeOmnirouteConfig(provider: string | undefined, key: "search"
     // ENOENT or malformed: start from `{}`. Continue with write.
   }
 
+  const raw = root["pi-provider-omniroute"];
+  const block = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
   if (provider === undefined) {
-    delete root[key];
+    if (raw === undefined) return; // nothing to delete; skip the no-op rewrite
+    delete block[key];
   } else {
-    if (!root[key] || typeof root[key] !== "object" || Array.isArray(root[key])) {
-      root[key] = {};
+    if (!block[key] || typeof block[key] !== "object" || Array.isArray(block[key])) {
+      block[key] = {};
     }
-    (root[key] as Record<string, unknown>)["provider"] = provider;
+    (block[key] as Record<string, unknown>)["provider"] = provider;
+  }
+  // Only write the block back when we are setting a value or the key already
+  // existed: deleting on a file without the block must not materialize an
+  // empty `"pi-provider-omniroute": {}`.
+  if (provider !== undefined || raw !== undefined) {
+    root["pi-provider-omniroute"] = block;
   }
 
   try {
@@ -383,6 +467,148 @@ export function writeOmnirouteConfig(provider: string | undefined, key: "search"
     console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
     try { unlinkSync(tmp); } catch { /* ignore */ }
   }
+}
+
+export type BaseUrlInputResult =
+  | { ok: true; value: string | undefined }
+  | { ok: false; error: string };
+
+export function parseBaseUrlInput(raw: string): BaseUrlInputResult {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: validateAndNormalizeBaseUrl(trimmed) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export function writeOmnirouteBaseUrl(url: string | undefined): void {
+  const path = resolveAgentSettingsPath();
+  const tmp = path + ".tmp";
+  let root: Record<string, unknown> = {};
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      root = parsed as Record<string, unknown>;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`[omniroute] failed to read ${path} before write: ${(err as Error).message}`);
+    }
+  }
+  const raw = root["pi-provider-omniroute"];
+  const block = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  if (url === undefined) {
+    if (raw === undefined) return; // reset with no block: nothing to do
+    delete block.baseUrl;
+  } else {
+    block.baseUrl = url;
+  }
+  // Only write the block back when we are setting a value or the key already
+  // existed: deleting on a file without the block must not materialize an
+  // empty `"pi-provider-omniroute": {}`.
+  if (url !== undefined || raw !== undefined) {
+    root["pi-provider-omniroute"] = block;
+  }
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(root, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    console.warn(`[omniroute] failed to write ${path}: ${(err as Error).message}`);
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+  }
+}
+
+// --- Legacy migration ---
+
+// Reads the `provider` string out of a legacy search/fetch entry (old
+// omniroute.json shape), or undefined when the entry is not an object with a
+// string provider.
+function legacyProviderId(v: unknown): string | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const p = (v as Record<string, unknown>)["provider"];
+  return typeof p === "string" ? p : undefined;
+}
+
+// One-time migration of legacy baseUrl sources into the settings.json
+// `pi-provider-omniroute` block. Returns the migrated baseUrl, or undefined
+// when no migration happened (idempotent: once the block has a baseUrl — or
+// the env wins — there is nothing to migrate).
+export function migrateLegacyConfig(): string | undefined {
+  if (readOmnirouteConfig().baseUrl !== undefined) return undefined;
+  if (process.env.OMNIROUTE_BASE_URL) return undefined;
+
+  // Source ①: old $PI_AGENT_DIR/omniroute.json (same directory as
+  // settings.json). Its baseUrl/search/fetch merge into the block, only
+  // filling fields the block is missing.
+  const oldPath = join(dirname(resolveAgentSettingsPath()), "omniroute.json");
+  let oldCfg: Record<string, unknown> | undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(oldPath, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      oldCfg = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Missing or malformed → source ① skipped.
+  }
+
+  const cur = readOmnirouteConfig();
+  const next: { baseUrl?: string; search?: string; fetch?: string } = {};
+  if (cur.baseUrl === undefined) {
+    const oldBase = oldCfg?.baseUrl;
+    if (typeof oldBase === "string") next.baseUrl = oldBase;
+  }
+  const oldSearchProvider = legacyProviderId(oldCfg?.search);
+  if (cur.search === undefined && oldSearchProvider !== undefined) next.search = oldSearchProvider;
+  const oldFetchProvider = legacyProviderId(oldCfg?.fetch);
+  if (cur.fetch === undefined && oldFetchProvider !== undefined) next.fetch = oldFetchProvider;
+
+  let migrated = next.baseUrl;
+  let fromLegacyAuth = false;
+  if (migrated === undefined) {
+    // Source ②: legacy auth.json credential env (baseUrl only), used only
+    // when source ① provided no baseUrl.
+    const legacy = resolveStoredBaseUrl();
+    if (typeof legacy === "string") {
+      next.baseUrl = legacy;
+      migrated = legacy;
+      fromLegacyAuth = true;
+    }
+  }
+  if (migrated === undefined) return undefined;
+
+  // Persist into the block. The writers compose: each re-reads settings.json
+  // and preserves unknown root keys + already-written block fields.
+  writeOmnirouteBaseUrl(migrated);
+  if (next.search !== undefined) writeOmnirouteConfig(next.search, "search");
+  if (next.fetch !== undefined) writeOmnirouteConfig(next.fetch, "fetch");
+
+  const written = readOmnirouteConfig();
+  const landed =
+    written.baseUrl === migrated &&
+    (next.search === undefined || written.search?.provider === next.search) &&
+    (next.fetch === undefined || written.fetch?.provider === next.fetch);
+
+  // Delete the old file only after the block write actually landed; a failed
+  // write (e.g. read-only dir) keeps the file so the next startup can retry.
+  if (oldCfg !== undefined && landed) {
+    try {
+      unlinkSync(oldPath);
+    } catch (err) {
+      console.warn(`[omniroute] failed to remove legacy ${oldPath}: ${(err as Error).message}`);
+    }
+  }
+  // After a successful source-② migration, drop the legacy env key so an
+  // explicit reset (spec B4) can never be resurrected by the next session_start
+  // and the legacy value stops participating in any resolution (spec B1).
+  // A failed strip keeps the env for a retry next startup.
+  if (fromLegacyAuth && landed) {
+    stripStoredBaseUrlEnv();
+  }
+  return migrated;
 }
 
 // --- Fetch provider submenu ---
@@ -439,6 +665,7 @@ export interface MenuStateMachineDeps {
   readonly initialFetchProvider: string | undefined;
   readonly onCommitPersist: (provider: string | undefined) => void;
   readonly onCommitFetchPersist: (provider: string | undefined) => void;
+  readonly onCommitBaseUrl: (value: string | undefined) => void;
   readonly onClose: () => void;
 }
 
@@ -446,15 +673,16 @@ export interface MenuStateMachine {
   getComponent(tui: TUI, theme: Theme): Component;
   onActivateSearchProvider(): void;
   onActivateFetchProvider(): void;
+  onActivateBaseUrl(): void;
   onCommit(provider: string | undefined): void;
   onCancel(): void;
   onEsc(): void;
-  readonly mode: () => "top" | "sub-search" | "sub-fetch";
+  readonly mode: () => "top" | "sub-search" | "sub-fetch" | "sub-base-url";
   readonly catalog: () => SearchCatalog | undefined;
 }
 
 export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMachine {
-  let mode: "top" | "sub-search" | "sub-fetch" = "top";
+  let mode: "top" | "sub-search" | "sub-fetch" | "sub-base-url" = "top";
   let currentProvider = deps.initialCurrentProvider;
   let currentFetchProvider = deps.initialFetchProvider;
   let catalogValue: SearchCatalog | undefined = undefined;
@@ -473,6 +701,11 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   // two-row menu becomes keyboard-unusable (the "Web Fetch provider" row would
   // be unreachable). Invalidated on every mode transition / close.
   let cachedTopLevel: Component | undefined = undefined;
+  // Memoized Base URL editor (same rationale): the Input keeps its value in
+  // instance state, so the same instance must survive re-renders while in
+  // sub-base-url mode, or typed text resets on every frame. Invalidated on
+  // every commit/cancel/mode transition.
+  let cachedBaseUrlEditor: Component | undefined = undefined;
 
   const fetchCatalogAsync = async (tui: TUI): Promise<void> => {
     const controller = new AbortController();
@@ -512,9 +745,15 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       cachedTopLevel = undefined;
       cachedFetchSubmenu = undefined;
     },
+    onActivateBaseUrl: () => {
+      mode = "sub-base-url";
+      cachedTopLevel = undefined;
+      cachedBaseUrlEditor = undefined;
+    },
     onCommit: (provider) => {
       pendingFetch?.abort();
       cachedTopLevel = undefined;
+      cachedBaseUrlEditor = undefined;
       if (mode === "sub-fetch") {
         cachedFetchSubmenu = undefined;
         currentFetchProvider = provider;
@@ -531,6 +770,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
+      cachedBaseUrlEditor = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
@@ -539,6 +779,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
       cachedTopLevel = undefined;
       cachedSubmenu = undefined;
       cachedFetchSubmenu = undefined;
+      cachedBaseUrlEditor = undefined;
       pendingFetch?.abort();
       mode = "top";
       catalogValue = undefined;
@@ -550,6 +791,7 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
         cachedTopLevel = renderTopLevelMenu({
           currentProvider,
           fetchPreview: previewForProvider(currentFetchProvider),
+          baseUrlPreview: deps.resolveBaseUrl(),
           theme,
           onActivateSearchProvider: () => {
             mode = "sub-search";
@@ -564,10 +806,17 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
             cachedFetchSubmenu = undefined;
             tui.requestRender();
           },
+          onActivateBaseUrl: () => {
+            mode = "sub-base-url";
+            cachedTopLevel = undefined;
+            cachedBaseUrlEditor = undefined;
+            tui.requestRender();
+          },
           onClose: () => {
             cachedTopLevel = undefined;
             cachedSubmenu = undefined;
             cachedFetchSubmenu = undefined;
+            cachedBaseUrlEditor = undefined;
             pendingFetch?.abort();
             mode = "top";
             deps.onClose();
@@ -629,6 +878,29 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
           },
         });
         return cachedSubmenu;
+      }
+      // mode === "sub-base-url"
+      if (mode === "sub-base-url") {
+        if (cachedBaseUrlEditor) return cachedBaseUrlEditor;
+        cachedBaseUrlEditor = renderBaseUrlEditor({
+          current: deps.resolveBaseUrl(),
+          theme,
+          requestRender: () => tui.requestRender(),
+          onCommit: (value) => {
+            cachedTopLevel = undefined;
+            cachedBaseUrlEditor = undefined;
+            deps.onCommitBaseUrl(value);
+            mode = "top";
+            tui.requestRender();
+          },
+          onCancel: () => {
+            cachedTopLevel = undefined;
+            cachedBaseUrlEditor = undefined;
+            mode = "top";
+            tui.requestRender();
+          },
+        });
+        return cachedBaseUrlEditor;
       }
       // mode === "sub-fetch"
       if (cachedFetchSubmenu) return cachedFetchSubmenu;

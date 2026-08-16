@@ -12,13 +12,13 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
 
 - **Provider**
   - **OpenAI 兼容 chat provider** —— 在 `omniroute` provider 名下注册 OmniRoute，支持流式 chat completions 与 tool calling。
-  - **交互式登录** —— `/login` 时依次提示输入 API key 与 base URL，URL 非法可重试一次，默认值 `http://localhost:20128/v1`。
+  - **交互式登录** —— `/login omniroute` 走 Pi 标准 API-key 流程，只提示输入 API key，不再询问 baseUrl；key 也可来自 `OMNIROUTE_API_KEY` 环境变量。
   - **自动导入模型** —— 启动时调用 `GET /v1/models`，把每个被路由的模型（如 `openai/gpt-4o`）注册为 Pi 模型。
   - **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。
   - **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
 - **Settings**
-  - **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，当前启用项行首标 `✓`。
-  - **持久化配置** —— 选择写入 pi 全局 `omniroute.json`（`search.provider` / `fetch.provider`），每次会话启动自动加载。
+  - **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，各子菜单内当前启用项行首标 `✓`；**Base URL** 通过小编辑器修改（Enter 保存，空输入回车重置为默认，Esc 取消）。
+  - **持久化配置** —— 选择写入 pi 全局 `settings.json` 的 `pi-provider-omniroute` 块（`baseUrl` / `search.provider` / `fetch.provider`），每次会话启动自动加载。
 - **Tool**
   - **`omniroute_web_search` 工具** —— 封装 `POST /v1/search`，支持 14 个搜索引擎、2 种搜索类型、7 个时间范围、国家/语言过滤与可选的全文抽取。
   - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
@@ -47,23 +47,41 @@ pi install npm:@philogag/pi-provider-omniroute
 
 ## 配置
 
-### 1. 选择 base URL
+### 1. Base URL
 
 默认值 `http://localhost:20128/v1`。OmniRoute 的 OpenAI 兼容端点都在该前缀下，`openai-completions` 会自动追加 `/chat/completions`。
 
-如 OmniRoute 部署在别处，可任选其一：
+baseUrl 由 `/omniroute-settings` 菜单的 **Base URL** 条目管理，也可以直接编辑 `$PI_AGENT_DIR/settings.json`（或 `~/.pi/agent/settings.json`）中 `pi-provider-omniroute` 块的 `baseUrl` 字段：
 
-- 设置环境变量 `OMNIROUTE_BASE_URL=https://your-host/v1`，**或**
-- 在 Pi 中执行 `/login`，按提示输入新 URL（输入非法可重试一次）。
+```json
+{
+  "pi-provider-omniroute": { "baseUrl": "https://your-host/v1" }
+}
+```
+
+解析优先级（从高到低）：
+
+1. `settings.json` 的 `pi-provider-omniroute` 块 `baseUrl` 字段
+2. 环境变量 `OMNIROUTE_BASE_URL`
+3. 默认 `http://localhost:20128/v1`
+
+在 Base URL 编辑器中输入新 URL 并按 Enter 保存；留空并按 Enter 即重置为默认值；按 Escape 取消。扩展读写该配置块时保留 `settings.json` 的其他键（`packages`、`theme` 等）。
 
 ### 2. 提供 API key
 
-二选一：
+`/login omniroute` 只提示输入 API key（不再询问 baseUrl）。key 解析优先级：
 
-- 在 Pi 中执行 `/login` 并粘贴 OmniRoute API key；**或**
-- 设置环境变量 `OMNIROUTE_API_KEY`。
+1. 已保存的凭据（Pi 的 `auth.json`，路径：`$PI_AGENT_DIR/auth.json` 或 `~/.pi/agent/auth.json`）
+2. 环境变量 `OMNIROUTE_API_KEY`
 
-API key 会写入 Pi 的 `auth.json`（路径：`$PI_AGENT_DIR/auth.json` 或 `~/.pi/agent/auth.json`）。
+### 3. 旧版配置自动迁移
+
+旧版两处遗留会在启动时自动一次性迁移到 `settings.json` 的 `pi-provider-omniroute` 块，无需手动操作：
+
+- 旧的 `omniroute.json`（`$PI_AGENT_DIR/omniroute.json`，含 `baseUrl` / `search` / `fetch`）——迁移成功后该文件自动删除；
+- 旧 `auth.json` 凭据中保存的 `OMNIROUTE_BASE_URL`（仅 baseUrl）。
+
+之前配置过自定义 baseUrl 的用户升级后会自动保留该配置。
 
 ### 快速验证
 
@@ -116,12 +134,15 @@ pi --list-models | grep omniroute
 /omniroute-settings
 ```
 
-菜单为两级交互式（顶层 → provider 子面板），当前启用的 provider 行首标 `✓`。选择会持久化到 pi 全局配置文件 `$PI_AGENT_DIR/omniroute.json`（或 `~/.pi/agent/omniroute.json`）：
+菜单为两级交互式（顶层 → 子面板），当前启用的 provider 行首标 `✓`。选择会持久化到 pi 全局配置文件 `$PI_AGENT_DIR/settings.json`（或 `~/.pi/agent/settings.json`）的 `pi-provider-omniroute` 块：
 
 ```json
 {
-  "search": { "provider": "tavily-search" },
-  "fetch": { "provider": "jina-reader" }
+  "pi-provider-omniroute": {
+    "baseUrl": "http://localhost:20128/v1",
+    "search": { "provider": "tavily-search" },
+    "fetch": { "provider": "jina-reader" }
+  }
 }
 ```
 
@@ -154,13 +175,13 @@ npm test
 ```text
 src/
   index.ts              # 扩展入口：registerProvider + registerTool
-  auth.ts               # URL 校验 + 交互式 /login 流程
+  auth.ts               # URL 校验 + API key 认证
   auth-credentials.ts   # 从 auth.json 解析已存储凭据
   tools/
     http.ts             # HTTP 工具、凭据解析、错误约定
     search.ts           # omniroute_web_search
     web-fetch.ts        # omniroute_web_fetch
-    search-config.ts    # /omniroute-settings 菜单状态机 + omniroute.json 持久化
+    search-config.ts    # /omniroute-settings 菜单状态机 + settings.json 块持久化
 test/                   # 与 src/ 镜像
 docs/
   roadmap.md            # 长期规划（阶段 1–4）

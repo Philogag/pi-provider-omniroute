@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
+import type { ProviderAuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 
-function mockInteraction(answers: Array<string | Error>): AuthInteraction & { signal: AbortSignal; calls: AuthPrompt[] } {
+function mockInteraction(answers: Array<string | Error>): ProviderAuthInteraction & { calls: AuthPrompt[] } {
   const calls: AuthPrompt[] = [];
   return {
+    signal: new AbortController().signal,
     async prompt(p: AuthPrompt): Promise<string> {
       calls.push(p);
       const next = answers.shift();
@@ -13,66 +14,11 @@ function mockInteraction(answers: Array<string | Error>): AuthInteraction & { si
       return next;
     },
     notify() {},
-    signal: new AbortController().signal,
     get calls() {
       return calls;
     },
-  } as AuthInteraction & { signal: AbortSignal; calls: AuthPrompt[] };
+  };
 }
-
-async function getAuth() {
-  const mod = await import("../src/auth.ts");
-  return mod.omnirouteApiKeyAuth();
-}
-
-test("login: returns credential with key and env.OMNIROUTE_BASE_URL on success", async () => {
-  const auth = await getAuth();
-  const interaction = mockInteraction(["my-key", "https://router.example.com/v1"]);
-  const cred = await auth.login!(interaction);
-  assert.equal(cred.type, "api_key");
-  if (cred.type !== "api_key") throw new Error("narrow");
-  assert.equal(cred.key, "my-key");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://router.example.com/v1");
-});
-
-test("login: prompts twice — secret for key, text for baseUrl", async () => {
-  const auth = await getAuth();
-  const interaction = mockInteraction(["k", "http://localhost:20128/v1"]);
-  await auth.login!(interaction);
-  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls.length, 2);
-  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls[0].type, "secret");
-  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls[1].type, "text");
-});
-
-test("login: retries once on invalid baseUrl, then succeeds", async () => {
-  const auth = await getAuth();
-  const interaction = mockInteraction(["k", "not-a-url", "https://ok.com/v1"]);
-  const cred = await auth.login!(interaction);
-  if (cred.type !== "api_key") throw new Error("narrow");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "https://ok.com/v1");
-  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls.length, 3);
-});
-
-test("login: throws after MAX_URL_RETRIES (1) on persistently invalid URL", async () => {
-  const auth = await getAuth();
-  const interaction = mockInteraction(["k", "bad-1", "bad-2"]);
-  await assert.rejects(auth.login!(interaction), /Invalid base URL/);
-});
-
-test("login: empty baseUrl input falls back to default", async () => {
-  const auth = await getAuth();
-  const interaction = mockInteraction(["k", ""]);
-  const cred = await auth.login!(interaction);
-  if (cred.type !== "api_key") throw new Error("narrow");
-  assert.equal(cred.env?.OMNIROUTE_BASE_URL, "http://localhost:20128/v1");
-});
-
-test("login: propagates cancel error from interaction.prompt", async () => {
-  const auth = await getAuth();
-  const cancelError = new Error("cancelled");
-  const interaction = mockInteraction([cancelError]);
-  await assert.rejects(auth.login!(interaction), /cancelled/);
-});
 
 function mockCtx(envValues: Record<string, string | undefined>) {
   return {
@@ -85,98 +31,64 @@ function mockCtx(envValues: Record<string, string | undefined>) {
   };
 }
 
-// pi-ai 0.84+ requires `signal: AbortSignal` in the check input.
-const mockSignal = new AbortController().signal;
+async function getAuth() {
+  const mod = await import("../src/auth.ts");
+  return mod.omnirouteApiKeyAuth();
+}
 
-test("resolve: stored credential with both key and baseUrl", async () => {
+test("login: prompts exactly once (secret key only)", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
-  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/v1" } };
-  const result = await auth.resolve!({ ctx, credential, signal: mockSignal });
-  assert.deepEqual(result, {
-    auth: { apiKey: "stored-key", baseUrl: "https://stored/v1" },
-    env: { OMNIROUTE_BASE_URL: "https://stored/v1" },
-    source: "stored credential",
-  });
+  const interaction = mockInteraction(["my-key"]);
+  const cred = await auth.login!(interaction);
+  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls.length, 1);
+  assert.equal((interaction as unknown as { calls: AuthPrompt[] }).calls[0].type, "secret");
+  assert.equal(cred.type, "api_key");
+  if (cred.type !== "api_key") throw new Error("narrow");
+  assert.equal(cred.key, "my-key");
+  assert.equal(cred.env, undefined, "credential must not carry env/baseUrl");
 });
 
-test("resolve: stored credential with key only, no env", async () => {
+test("login: propagates cancel error from interaction.prompt", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({});
+  const cancelError = new Error("cancelled");
+  await assert.rejects(auth.login!(mockInteraction([cancelError])), /cancelled/);
+});
+
+test("resolve: stored credential key wins over env, no baseUrl/env leaked", async () => {
+  const auth = await getAuth();
+  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
   const credential = { type: "api_key" as const, key: "stored-key" };
-  const result = await auth.resolve!({ ctx, credential, signal: mockSignal });
-  assert.deepEqual(result, {
-    auth: { apiKey: "stored-key" },
-    env: undefined,
-    source: "stored credential",
-  });
+  const result = await auth.resolve!({ ctx, credential, signal: new AbortController().signal });
+  assert.ok(result);
+  assert.equal((result as { auth: { apiKey: string } }).auth.apiKey, "stored-key");
+  assert.equal((result as { auth: { baseUrl?: string } }).auth.baseUrl, undefined, "resolve must not emit baseUrl");
+  assert.equal((result as { env?: unknown }).env, undefined, "resolve must not emit env");
+  assert.equal((result as { source: string }).source, "stored credential");
 });
 
-test("resolve: ambient env with both key and baseUrl", async () => {
-  const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
-  const result = await auth.resolve!({ ctx, credential: undefined, signal: mockSignal });
-  assert.deepEqual(result, {
-    auth: { apiKey: "env-key", baseUrl: "https://env/v1" },
-    env: { OMNIROUTE_BASE_URL: "https://env/v1" },
-    source: "OMNIROUTE_API_KEY",
-  });
-});
-
-test("resolve: ambient env with key only", async () => {
+test("resolve: falls back to OMNIROUTE_API_KEY env when no stored credential", async () => {
   const auth = await getAuth();
   const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key" });
-  const result = await auth.resolve!({ ctx, credential: undefined, signal: mockSignal });
-  assert.deepEqual(result, {
-    auth: { apiKey: "env-key" },
-    env: undefined,
-    source: "OMNIROUTE_API_KEY",
-  });
+  const result = await auth.resolve!({ ctx, credential: undefined, signal: new AbortController().signal });
+  assert.ok(result);
+  assert.equal((result as { auth: { apiKey: string } }).auth.apiKey, "env-key");
+  assert.equal((result as { env?: unknown }).env, undefined);
 });
 
-test("resolve: no credential and no env returns undefined", async () => {
+test("resolve: returns undefined when no credential and no env", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({});
-  const result = await auth.resolve!({ ctx, credential: undefined, signal: mockSignal });
+  const result = await auth.resolve!({ ctx: mockCtx({}), credential: undefined, signal: new AbortController().signal });
   assert.equal(result, undefined);
-});
-
-test("resolve: stored credential wins over ambient env", async () => {
-  const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key", OMNIROUTE_BASE_URL: "https://env/v1" });
-  const credential = { type: "api_key" as const, key: "stored-key", env: { OMNIROUTE_BASE_URL: "https://stored/v1" } };
-  const result = await auth.resolve!({ ctx, credential, signal: mockSignal });
-  assert.equal((result as { auth: { apiKey: string } }).auth.apiKey, "stored-key");
-  assert.equal((result as { auth: { baseUrl?: string } }).auth.baseUrl, "https://stored/v1");
 });
 
 test("resolve: source field never contains the key value", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({});
-  const credential = { type: "api_key" as const, key: "supersecret", env: { OMNIROUTE_BASE_URL: "https://x/v1" } };
-  const result = await auth.resolve!({ ctx, credential, signal: mockSignal });
+  const result = await auth.resolve!({ ctx: mockCtx({}), credential: { type: "api_key" as const, key: "supersecret" }, signal: new AbortController().signal });
   assert.ok(result);
   assert.ok(!JSON.stringify(result.source ?? "").includes("supersecret"));
 });
 
-test("check: returns api_key check when stored credential has key", async () => {
+test("standard flow: auth has no custom check", async () => {
   const auth = await getAuth();
-  const ctx = mockCtx({});
-  const credential = { type: "api_key" as const, key: "stored-key" };
-  const result = await auth.check!({ ctx, credential, signal: mockSignal });
-  assert.deepEqual(result, { type: "api_key", source: "stored credential" });
-});
-
-test("check: returns api_key check when ambient env has key", async () => {
-  const auth = await getAuth();
-  const ctx = mockCtx({ OMNIROUTE_API_KEY: "env-key" });
-  const result = await auth.check!({ ctx, credential: undefined, signal: mockSignal });
-  assert.deepEqual(result, { type: "api_key", source: "OMNIROUTE_API_KEY" });
-});
-
-test("check: returns undefined when no credential and no env", async () => {
-  const auth = await getAuth();
-  const ctx = mockCtx({});
-  const result = await auth.check!({ ctx, credential: undefined, signal: mockSignal });
-  assert.equal(result, undefined);
+  assert.equal(auth.check, undefined, "standard api-key auth must not carry a check");
 });

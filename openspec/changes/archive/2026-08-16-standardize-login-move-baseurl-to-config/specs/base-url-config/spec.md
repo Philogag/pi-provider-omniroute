@@ -34,6 +34,8 @@
 
 迁移只发生一次（写入后配置块字段存在，后续启动不再迁移）；若迁移写入 settings.json 失败，不得删除旧文件，告警后下次启动再次尝试。
 
+从 auth.json 成功迁移 baseUrl（源②）后，扩展必须从该凭据的 `env` 中移除 `OMNIROUTE_BASE_URL`（保留 apiKey 与其余 env 键；env 变空时删除整个 env 字段），使该遗留值不再参与任何解析，且用户在菜单中重置 baseUrl 后不会被下一次会话启动重新迁移；清除失败（如 auth.json 不可写）时保留该值并告警，下次启动重试。
+
 #### Scenario: 启动时存在旧 omniroute.json 则迁移并删除
 - **WHEN** 会话启动时配置块无 `baseUrl`、env 未设置、且旧 `omniroute.json` 存在
 - **THEN** 扩展把该文件的 baseUrl 与 search/fetch provider 配置并入配置块（不覆盖块内已有字段），本次会话使用迁移后的 baseUrl，迁移成功后删除旧文件
@@ -41,6 +43,14 @@
 #### Scenario: 启动时存在 auth.json 遗留值则迁移
 - **WHEN** 会话启动时配置块无 `baseUrl`、env 未设置、无旧 `omniroute.json`、但 auth.json 凭据 env 存在 `OMNIROUTE_BASE_URL`
 - **THEN** 扩展把该值写入配置块的 `baseUrl` 字段，本次会话使用该 baseUrl
+
+#### Scenario: 迁移成功后清除 auth.json 遗留 env
+- **WHEN** 源②迁移成功（auth.json 凭据 env 的 `OMNIROUTE_BASE_URL` 已并入配置块）
+- **THEN** 该 env 键被从凭据中移除（apiKey 与其余 env 键保留；env 变空则删除整个 env 字段），此后用户在菜单中重置 baseUrl 不会被下一次会话启动重新迁移
+
+#### Scenario: 迁移后重置不会复活遗留值
+- **WHEN** 用户通过 `/omniroute-settings` 重置 baseUrl（空输入回车，删除配置块 `baseUrl` 字段）后再次启动会话
+- **THEN** 配置块仍无 `baseUrl`（旧 auth.json 遗留值已被清除，不会重新迁移），解析回退 env/默认值
 
 #### Scenario: 迁移写入失败时保留旧文件
 - **WHEN** 迁移写入 settings.json 失败（如目录不可写）

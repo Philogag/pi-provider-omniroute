@@ -1,13 +1,13 @@
 // src/index.ts — pi extension entry
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import type { Provider, Model, Context, StreamOptions, SimpleStreamOptions, RefreshModelsContext } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/compat";
 import { omnirouteApiKeyAuth } from "./auth.ts";
 import { searchTool, setSearchConfigReader } from "./tools/search.ts";
 import { webFetchTool, setFetchConfigReader, normalizeFetchProvider } from "./tools/web-fetch.ts";
-import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, resolveOmnirouteBaseUrl } from "./tools/search-config.ts";
-import { resolveApiKey, resolveBaseUrl } from "./tools/http.ts";
+import { readOmnirouteConfig, createMenuStateMachine, writeOmnirouteConfig, writeOmnirouteBaseUrl, resolveOmnirouteBaseUrl, migrateLegacyConfig } from "./tools/search-config.ts";
+import { resolveApiKey } from "./tools/http.ts";
 import type { OmnirouteTelemetry } from "./tools/usage-telemetry.ts";
 import { withOmnirouteFetch, wrapStreamWithCost } from "./tools/usage-telemetry.ts";
 
@@ -74,11 +74,32 @@ function toOmnirouteModel(m: OmnirouteModelEntry, baseUrl: string): OmnirouteMod
 }
 
 export default async function (pi: ExtensionAPI) {
-  // Precedence: omniroute.json baseUrl → OMNIROUTE_BASE_URL env → legacy
-  // auth.json env (pre-omp-compat /login) → default.
-  const baseUrl = resolveOmnirouteBaseUrl();
+  // Precedence: settings.json `pi-provider-omniroute` block baseUrl →
+  // OMNIROUTE_BASE_URL env → default. Legacy sources (old omniroute.json and
+  // the auth.json credential env) are migrated once into the block at session
+  // start (see migrateLegacyConfig).
+  let baseUrl = resolveOmnirouteBaseUrl();
 
   let models: OmnirouteModel[] = [];
+
+  // Best-effort refresh of the omniroute model list after the baseUrl changed
+  // (migration or menu edit). Never throws: on failure we warn and notify so
+  // the models are picked up on the next session.
+  async function refreshOmnirouteModels(ctx: ExtensionContext): Promise<void> {
+    try {
+      // Newer hosts accept {providers, force}; the installed 0.83.0 host takes
+      // no arguments and ignores extras — the call shape is harmless either way.
+      const refresh = ctx.modelRegistry.refresh as unknown as (opts: { providers: string[]; force: boolean }) => Promise<void>;
+      await refresh({ providers: ["omniroute"], force: true });
+    } catch (err) {
+      console.warn("[omniroute] model refresh after baseUrl change failed:", err);
+      try {
+        ctx.ui.notify("Base URL 已更新，模型将在下次会话刷新", "info");
+      } catch {
+        // Test doubles may not provide ui.
+      }
+    }
+  }
 
   const provider: Provider<"openai-completions"> = {
     id: "omniroute",
@@ -182,10 +203,19 @@ export default async function (pi: ExtensionAPI) {
     }
   }
 
-  // Load persisted search provider config (omniroute.json) on session start.
+  // Load persisted search provider config (settings.json block) on session
+  // start, and run the one-time migration of legacy baseUrl sources (old
+  // omniroute.json + auth.json credential env) into the block. After a
+  // migration, re-stamp the module-level baseUrl and best-effort refresh the
+  // model list so it reflects the migrated URL.
   // Optional call: the host may not implement `on` (e.g. test doubles for the
   // existing use-models-metadata mock which only registers provider + tool).
-  pi.on?.("session_start", async () => {
+  pi.on?.("session_start", async (_ev: unknown, ctx: ExtensionContext) => {
+    const migrated = migrateLegacyConfig();
+    if (migrated !== undefined) {
+      baseUrl = migrated;
+      await refreshOmnirouteModels(ctx);
+    }
     const cfg = readOmnirouteConfig();
     currentConfigProvider = cfg.search?.provider;
     currentFetchProvider = normalizeFetchProvider(cfg.fetch?.provider);
@@ -211,7 +241,7 @@ export default async function (pi: ExtensionAPI) {
       }
       const sm = createMenuStateMachine({
         resolveApiKey: () => resolveApiKey(ctx),
-        resolveBaseUrl: () => resolveBaseUrl(ctx),
+        resolveBaseUrl: () => baseUrl,
         initialCurrentProvider: currentConfigProvider,
         initialFetchProvider: currentFetchProvider,
         onCommitPersist: (provider) => {
@@ -221,6 +251,11 @@ export default async function (pi: ExtensionAPI) {
         onCommitFetchPersist: (provider) => {
           currentFetchProvider = provider;
           writeOmnirouteConfig(provider, "fetch");
+        },
+        onCommitBaseUrl: (value) => {
+          writeOmnirouteBaseUrl(value);
+          baseUrl = value ?? resolveOmnirouteBaseUrl();
+          void refreshOmnirouteModels(ctx);
         },
         onClose: () => {},
       });

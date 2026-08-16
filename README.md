@@ -14,12 +14,12 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
 
 - **Provider**
   - **OpenAI-compatible chat provider** — registers OmniRoute under the `omniroute` provider id, streams chat completions, and supports tool calling.
-  - **Interactive login** — `/login` prompts for an API key and base URL, with retry on invalid URLs and a sensible default of `http://localhost:20128/v1`.
+  - **Interactive login** — `/login omniroute` follows Pi's standard API-key flow and prompts for the API key only; the key can also come from the `OMNIROUTE_API_KEY` env var. The base URL is configured separately (see [Configuration](#configuration)).
   - **Auto-imported models** — at startup, fetches `GET /v1/models` and registers every routed model (e.g. `openai/gpt-4o`) as a Pi model.
   - **Lazy model refresh** — model list is fetched on demand, not eagerly on extension load, so Pi starts even if OmniRoute is offline.
 - **Settings**
-  - **`/omniroute-settings` TUI menu** — a two-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback) or a default **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), each with a `✓` marker on the currently active entry.
-  - **Persistent config** — choices are saved to the pi-global `omniroute.json` (`search.provider` / `fetch.provider`) and re-loaded on every session start.
+  - **`/omniroute-settings` TUI menu** — a two-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback) or **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), with a `✓` marker on the active provider in each submenu, or edit the **Base URL** in a small editor (Enter saves, empty input resets to the default, Esc cancels).
+  - **Persistent config** — choices are saved to the `pi-provider-omniroute` block of the pi-global `settings.json` (`baseUrl` / `search.provider` / `fetch.provider`) and re-loaded on every session start.
 - **Tool**
   - **`omniroute_web_search` tool** — wraps `POST /v1/search` with 14 search providers, 2 search types, 7 time ranges, country/language filters, and rich content extraction options.
   - **`omniroute_web_fetch` tool** — wraps `POST /v1/web/fetch` with 4 fetch providers (Firecrawl, Jina Reader, Tavily Extract, TinyFish), 4 output formats, depth, and selector wait.
@@ -40,12 +40,51 @@ pi install npm:@philogag/pi-provider-omniroute
 > Development builds from source:
 > `pi install git:github.com/Philogag/pi-provider-omniroute`
 
-Then connect into your OmniRoute instance with `/login omniroute` and paste your API KEY and base URL
-
+Then connect into your OmniRoute instance with `/login omniroute` and paste your API KEY (the only thing it asks for).
 
 > Get the "OmniRoute base URL" from your OmniRoute Dashboard  
 > -> "Endpoints" -> "API Endpoint" -> "Public"  
-> Which should looks like "http://localhost:20128/v1"   
+> Which should looks like "http://localhost:20128/v1"  
+>
+> The base URL is no longer part of `/login` — configure it via `/omniroute-settings` → **Base URL**, or edit the `pi-provider-omniroute` block of `~/.pi/agent/settings.json` directly (see [Configuration](#configuration)).
+
+## Configuration
+
+### 1. Base URL
+
+The default is `http://localhost:20128/v1`. All of OmniRoute's OpenAI-compatible endpoints live under this prefix (`openai-completions` appends `/chat/completions`).
+
+The base URL is managed from the **Base URL** entry of the `/omniroute-settings` menu, or by editing the `baseUrl` field of the `pi-provider-omniroute` block in `$PI_AGENT_DIR/settings.json` (or `~/.pi/agent/settings.json`) directly:
+
+```json
+{
+  "pi-provider-omniroute": { "baseUrl": "https://your-host/v1" }
+}
+```
+
+Resolution priority (highest first):
+
+1. `baseUrl` in the `pi-provider-omniroute` block of `settings.json`
+2. `OMNIROUTE_BASE_URL` env var
+3. Default `http://localhost:20128/v1`
+
+In the Base URL editor, type a new URL and press Enter to save; press Enter with an empty input to reset to the default; press Escape to cancel. When the extension reads or writes the block it preserves the other keys of `settings.json` (e.g. `packages`, `theme`).
+
+### 2. API key
+
+`/login omniroute` follows Pi's standard API-key flow and prompts for the API key only (it no longer asks for a base URL). The key is resolved in this order:
+
+1. Stored credentials in Pi's `auth.json` (`$PI_AGENT_DIR/auth.json` or `~/.pi/agent/auth.json`)
+2. `OMNIROUTE_API_KEY` env var
+
+### 3. One-time migration of legacy config
+
+Two legacy leftovers are migrated automatically into the `pi-provider-omniroute` block of `settings.json` at startup — no manual action needed:
+
+- The old `omniroute.json` (`$PI_AGENT_DIR/omniroute.json`, holding `baseUrl` / `search` / `fetch`); the file is deleted after a successful migration.
+- The `OMNIROUTE_BASE_URL` stored inside the old `auth.json` credential (base URL only).
+
+Users who configured a custom base URL in a previous version will see it preserved automatically.
 
 ## Default tool providers
 
@@ -55,12 +94,15 @@ Both tools send their requests without a `provider` field unless one is explicit
 /omniroute-settings
 ```
 
-This opens an interactive TUI menu (top-level → provider submenu) with the currently enabled provider marked with `✓`. Selections are persisted to the pi-global config file at `$PI_AGENT_DIR/omniroute.json` (or `~/.pi/agent/omniroute.json`):
+This opens an interactive TUI menu (top-level → submenu) with the currently enabled provider marked with `✓`. Selections are persisted to the `pi-provider-omniroute` block of the pi-global config file at `$PI_AGENT_DIR/settings.json` (or `~/.pi/agent/settings.json`):
 
 ```json
 {
-  "search": { "provider": "tavily-search" },
-  "fetch": { "provider": "jina-reader" }
+  "pi-provider-omniroute": {
+    "baseUrl": "http://localhost:20128/v1",
+    "search": { "provider": "tavily-search" },
+    "fetch": { "provider": "jina-reader" }
+  }
 }
 ```
 
@@ -93,13 +135,13 @@ The test suite uses Node's `--experimental-strip-types` and exercises auth flows
 ```text
 src/
   index.ts              # Extension entry: registerProvider + registerTool
-  auth.ts               # URL validation + interactive /login flow
+  auth.ts               # URL validation + API-key auth
   auth-credentials.ts   # Stored-credential resolution from auth.json
   tools/
     http.ts             # Shared HTTP helper, credential resolver, error contract
     search.ts           # omniroute_web_search
     web-fetch.ts        # omniroute_web_fetch
-    search-config.ts    # /omniroute-settings menu state machine + omniroute.json persistence
+    search-config.ts    # /omniroute-settings menu state machine + settings.json block persistence
 test/                   # Mirrors src/ layout
 docs/
   roadmap.md            # Long-term plan (phases 1–4)

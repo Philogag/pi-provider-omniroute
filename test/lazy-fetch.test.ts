@@ -71,9 +71,9 @@ test("refreshModels 成功时填充缓存", async () => {
   assert.equal(models[0].baseUrl, OMNIROUTE_DEFAULT_BASE_URL);
 });
 
-test("refreshModels 使用 omniroute.json 中的 baseUrl（优先于默认值）", async () => {
+test("refreshModels 使用 settings.json 中 pi-provider-omniroute 块的 baseUrl（优先于默认值）", async () => {
   const { writeFileSync } = await import("node:fs");
-  writeFileSync(join(process.env.PI_AGENT_DIR!, "omniroute.json"), JSON.stringify({ baseUrl: "https://route.ai.philogag.com/v1" }));
+  writeFileSync(join(process.env.PI_AGENT_DIR!, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://route.ai.philogag.com/v1" } }));
   let fetchedUrl: string | undefined;
   mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
     fetchedUrl = String(input);

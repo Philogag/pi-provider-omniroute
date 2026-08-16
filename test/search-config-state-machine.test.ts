@@ -31,6 +31,7 @@ function makeDeps(overrides: Partial<MenuStateMachineDeps> = {}): MenuStateMachi
     initialFetchProvider: undefined,
     onCommitPersist: (provider) => commits.push([provider, "persisted"]),
     onCommitFetchPersist: () => {},
+    onCommitBaseUrl: () => {},
     onClose: () => {},
     ...overrides,
   };
@@ -143,6 +144,16 @@ test("createMenuStateMachine: fetch submenu instance is cached across renders an
   assert.notEqual(third, first, "fetch submenu must be recreated after commit + re-activation");
 });
 
+test("createMenuStateMachine: sub-fetch mode renders the fetch submenu, not the base-url editor", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  sm.onActivateFetchProvider();
+  const comp = sm.getComponent(tui, fakeTheme) as unknown as { render: (w: number) => string[] };
+  const rendered = comp.render(80).join("\n");
+  assert.match(rendered, /Web Fetch Provider/, "sub-fetch must render the fetch submenu");
+  assert.doesNotMatch(rendered, /Base URL:/, "sub-fetch must not be shadowed by the base-url editor");
+});
+
 test("createMenuStateMachine: requestRender is called after the catalog fetch resolves", async () => {
   let releaseFetch: () => void = () => {};
   const gate = new Promise<void>((resolve) => { releaseFetch = resolve; });
@@ -193,4 +204,68 @@ test("C1 regression: top-level cache is invalidated on mode transitions (preview
   assert.equal(sm.mode(), "top");
   const second = sm.getComponent(tui, fakeTheme);
   assert.notEqual(second, first, "top-level component must be recreated after leaving and returning to top");
+});
+
+test("createMenuStateMachine: onActivateBaseUrl switches to sub-base-url mode", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  sm.onActivateBaseUrl();
+  assert.equal(sm.mode(), "sub-base-url");
+});
+
+test("createMenuStateMachine: base-url editor instance is cached across renders", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  sm.onActivateBaseUrl();
+  const first = sm.getComponent(tui, fakeTheme);
+  const second = sm.getComponent(tui, fakeTheme);
+  assert.equal(first, second, "base-url editor must be the same cached instance");
+});
+
+test("createMenuStateMachine: editor commit returns to top, updates preview via resolveBaseUrl", () => {
+  const deps = makeDeps();
+  const sm = createMenuStateMachine(deps);
+  sm.onActivateBaseUrl();
+  // 通过暴露的 _input 提交合法值（编辑器预填当前值，先 setValue 覆盖）
+  const comp = sm.getComponent(makeTui(), fakeTheme) as unknown as {
+    _input: { setValue(v: string): void };
+    handleInput: (d: string) => void;
+  };
+  comp._input.setValue("https://new.example/v1");
+  comp.handleInput("\n");
+  assert.equal(sm.mode(), "top");
+});
+
+test("createMenuStateMachine: base-url commit calls onCommitBaseUrl", () => {
+  const committed: Array<string | undefined> = [];
+  const sm = createMenuStateMachine(makeDeps({ onCommitBaseUrl: (v) => committed.push(v) }));
+  sm.onActivateBaseUrl();
+  const comp = sm.getComponent(makeTui(), fakeTheme) as unknown as {
+    _input: { setValue(v: string): void };
+    handleInput: (d: string) => void;
+  };
+  comp._input.setValue("https://new.example/v1");
+  comp.handleInput("\n");
+  assert.deepEqual(committed, ["https://new.example/v1"]);
+});
+
+test("createMenuStateMachine: editor Escape returns to top without committing", () => {
+  const committed: Array<string | undefined> = [];
+  const sm = createMenuStateMachine(makeDeps({ onCommitBaseUrl: (v) => committed.push(v) }));
+  sm.onActivateBaseUrl();
+  const comp = sm.getComponent(makeTui(), fakeTheme) as unknown as { handleInput: (d: string) => void };
+  comp.handleInput("\x1b");
+  assert.equal(sm.mode(), "top");
+  assert.deepEqual(committed, []);
+});
+
+test("C1 regression: Down Down + Enter on top menu activates the base-url editor", () => {
+  const sm = createMenuStateMachine(makeDeps());
+  const tui = makeTui();
+  const frame = () => sm.getComponent(tui, fakeTheme) as unknown as { handleInput: (d: string) => void };
+  frame();
+  frame().handleInput("\x1b[B");
+  frame().handleInput("\x1b[B");
+  const after = frame();
+  after.handleInput("\r");
+  assert.equal(sm.mode(), "sub-base-url", "three-row top menu: Down Down + Enter must activate base-url editor");
 });

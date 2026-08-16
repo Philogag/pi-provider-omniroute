@@ -1,6 +1,9 @@
 // test/tools-http.test.ts
-import { test } from "node:test";
+import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { OMNIROUTE_DEFAULT_BASE_URL } from "../src/auth.ts";
 import { resolveApiKey, resolveBaseUrl } from "../src/tools/http.ts";
@@ -12,24 +15,54 @@ function ctxWith(model: ExtensionContext["model"], apiKey?: string): ExtensionCo
   } as unknown as ExtensionContext;
 }
 
+// 环境隔离：PI_AGENT_DIR 指向临时目录，避免开发者本机 ~/.pi/agent/settings.json
+// 的 omniroute 块干扰回退断言（配置回退用例显式 seed 各自的 settings.json）。
+const origPiAgentDir = process.env.PI_AGENT_DIR;
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "omniroute-http-test-"));
+  process.env.PI_AGENT_DIR = dir;
+});
+after(() => {
+  if (origPiAgentDir === undefined) delete process.env.PI_AGENT_DIR;
+  else process.env.PI_AGENT_DIR = origPiAgentDir;
+});
+
 test("resolveBaseUrl: prefers current omniroute model baseUrl", () => {
   const ctx = ctxWith({ provider: "omniroute", baseUrl: "http://remote:9000/v1" } as ExtensionContext["model"]);
   assert.equal(resolveBaseUrl(ctx), "http://remote:9000/v1");
 });
 
-test("resolveBaseUrl: ignores non-omniroute model, falls back to env", () => {
+test("resolveBaseUrl: non-omniroute model falls back to config block baseUrl", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
+  const ctx = ctxWith({ provider: "anthropic", baseUrl: "http://other/v1" } as ExtensionContext["model"]);
+  assert.equal(resolveBaseUrl(ctx), "https://cfg.example/v1");
+});
+
+test("resolveBaseUrl: config block baseUrl wins over env", () => {
+  writeFileSync(join(dir, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://cfg.example/v1" } }));
   const before = process.env.OMNIROUTE_BASE_URL;
   process.env.OMNIROUTE_BASE_URL = "http://env-host/v1";
   try {
-    const ctx = ctxWith({ provider: "anthropic", baseUrl: "http://other/v1" } as ExtensionContext["model"]);
-    assert.equal(resolveBaseUrl(ctx), "http://env-host/v1");
+    assert.equal(resolveBaseUrl(ctxWith(undefined)), "https://cfg.example/v1");
   } finally {
     if (before === undefined) delete process.env.OMNIROUTE_BASE_URL;
     else process.env.OMNIROUTE_BASE_URL = before;
   }
 });
 
-test("resolveBaseUrl: no model, no env -> default constant", () => {
+test("resolveBaseUrl: no model, no config -> env fallback", () => {
+  const before = process.env.OMNIROUTE_BASE_URL;
+  process.env.OMNIROUTE_BASE_URL = "http://env-host/v1";
+  try {
+    assert.equal(resolveBaseUrl(ctxWith(undefined)), "http://env-host/v1");
+  } finally {
+    if (before === undefined) delete process.env.OMNIROUTE_BASE_URL;
+    else process.env.OMNIROUTE_BASE_URL = before;
+  }
+});
+
+test("resolveBaseUrl: no model, no config, no env -> default constant", () => {
   const before = process.env.OMNIROUTE_BASE_URL;
   delete process.env.OMNIROUTE_BASE_URL;
   try {
