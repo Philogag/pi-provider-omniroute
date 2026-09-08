@@ -24,7 +24,7 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
   - **`omniroute_web_fetch` 工具** —— 封装 `POST /v1/web/fetch`，支持 4 个抓取后端（Firecrawl、Jina Reader、Tavily Extract、TinyFish），4 种输出格式、0–2 层递归与 CSS 选择器等待。
   - **可配置默认 provider** —— 两个工具执行时按"显式入参 > 已配置 > 省略"合并 `provider` 字段，在 `/omniroute-settings` 固定默认值，无需改变模型的调用方式。
   - **TypeBox 校验入参** —— 工具入参由 Pi 做静态校验。
-  - **成本遥测** —— 将 OmniRoute `X-OmniRoute-*` 遥测的真实美元成本写入 Pi 的用量/成本统计，完整遥测附加到每条消息的 `diagnostics`。
+  - **成本遥测** —— 将 OmniRoute `X-OmniRoute-*` 遥测的真实美元成本与网关速率（tok/s、TTFT）写入 Pi 的用量/成本统计，完整遥测附加到每条消息的 `diagnostics`。
 
 ## 环境要求
 
@@ -156,11 +156,12 @@ pi --list-models | grep omniroute
 
 ### 成本遥测
 
-OmniRoute 在每个流式响应体的尾部以 SSE 注释行（`: x-omniroute-*`）下发单次请求的成本数据。扩展拦截字节流、解析这些行，并接入 Pi 的计费体系：
+OmniRoute 在每个流式响应体的尾部以 SSE 注释行（`: x-omniroute-*`）下发单次请求的遥测数据（成本、token、速率、路由）。扩展拦截字节流、解析这些行，并接入 Pi 的计费体系：
 
 - **Pi 用量统计显示真实成本** —— `X-OmniRoute-Response-Cost`（定长小数 USD 金额，如 `0.0000190400`）覆盖每条消息的 `usage.cost.total`，Pi 的成本/用量汇总反映 OmniRoute 的实际计费而非模型的静态价格；token 数仍采用 Pi 的解析值。
 - **缓存命中按 $0 计费** —— 当 `X-OmniRoute-Cache-Hit` 为 `true` 时，OmniRoute 上报的 `Response-Cost` 为 `0`；扩展原样采用，被缓存的轮次成本显示为 `0`。
-- **完整遥测写入 `diagnostics`** —— 每条消息携带 `omniroute-telemetry` 诊断，包含 `model`、`provider`、`tokensIn`、`tokensOut`、`cacheHit`、`responseCost`、`latencyMs`，可随时查看任意轮次的路由细节。
+- **网关速率指标** —— 解析 `X-OmniRoute-Tokens-Per-Second`（生成速率）与 `X-OmniRoute-Ttft-Ms`（首 token 延迟），仅保留正值。缺失或为 0 的 `tok/s` 绝不根据 `latency-ms` 推算（该延迟包含 TTFT，推算值不可靠）。
+- **完整遥测写入 `diagnostics`** —— 只要捕获到任意遥测字段（不以是否上报成本为前提），消息即携带 `omniroute-telemetry` 诊断，包含 `model`、`provider`、`tokensIn`、`tokensOut`、`cacheHit`、`responseCost`、`tokensPerSecond`、`ttftMs`、`latencyMs`（未捕获的字段省略），可随时查看任意轮次的路由与速度细节。`usage.cost.total` 仅在存在 `Response-Cost` 时覆盖；token 计数与成本分项绝不被修改。
 
 捕获是尽力而为且字节透传：若遥测缺失（旧版 OmniRoute、非 OmniRoute 响应），流原样透传，Pi 回退到静态定价。
 
