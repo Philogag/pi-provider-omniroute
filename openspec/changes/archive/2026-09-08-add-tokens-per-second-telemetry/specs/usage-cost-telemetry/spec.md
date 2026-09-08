@@ -1,9 +1,4 @@
-# usage-cost-telemetry 规范
-
-## 目的
-
-将 OmniRoute 路由网关通过响应 body SSE 注释行（`: x-omniroute-*`）下发的成本遥测接入 Pi 的计费统计：会话消息成本反映 `X-OmniRoute-Response-Cost` 报告的真实美元金额（缓存命中按 $0 计费），完整遥测（模型、provider、tokens、缓存命中、延迟）以 `omniroute-telemetry` 类型附加到消息 `diagnostics`。
-## 需求
+## MODIFIED Requirements
 ### 需求:捕获 OmniRoute 成本遥测
 
 系统必须捕获 OmniRoute 流式完成响应 body 中的 `X-OmniRoute-*` 遥测数据，包括 `X-OmniRoute-Response-Cost`（USD 金额）、`X-OmniRoute-Tokens-In`、`X-OmniRoute-Tokens-Out`、`X-OmniRoute-Tokens-Per-Second`（生成速率，仅正值有效）、`X-OmniRoute-Ttft-Ms`（首 token 延迟，仅正值有效）、`X-OmniRoute-Model`、`X-OmniRoute-Provider`、`X-OmniRoute-Cache-Hit`、`X-OmniRoute-Latency-Ms`。系统必须解析响应 body 中以 `: x-omniroute-` 前缀的 SSE 注释行。系统不得从 `X-OmniRoute-Latency-Ms` 推算 tokens-per-second（该延迟包含 TTFT，推算值不可靠）；网关未报告或报告 0/非法值的 tok/s 与 ttft 必须保持缺失。系统不得修改流式响应的原始字节流（透传语义必须保持）。
@@ -38,30 +33,6 @@
 - **当** 遥测行中的数值不是有效数字（如 `: x-omniroute-response-cost=abc`）
 - **那么** 系统忽略该行，不覆盖成本统计
 
-### 需求:成本遥测接入 Pi 计费统计
-
-系统必须将捕获的 `X-OmniRoute-Response-Cost` 写入 Pi 会话消息的 `message.usage.cost.total` 字段。写入必须在流结束（`done` 事件）时进行。系统必须仅覆盖 `total` 字段，不得修改 `usage` 的 token 计数（`input_tokens`/`output_tokens`），也不得修改 `cost` 的 `input`/`output`/`cacheRead`/`cacheWrite` 分项。
-
-#### 场景:流结束覆盖成本总计
-
-- **当** 流完成（`done` 事件）且已捕获遥测 responseCost 0.00001904
-- **那么** 最终消息的 `message.usage.cost.total` 为 0.00001904
-
-#### 场景:覆盖仅限 omniroute provider
-
-- **当** 非 omniroute provider 发起流式请求
-- **那么** 其响应不被该遥测捕获逻辑处理，成本统计不受影响
-
-#### 场景:缓存命中时成本为零
-
-- **当** 遥测报告 `X-OmniRoute-Cache-Hit: true` 且 `X-OmniRoute-Response-Cost` 为 0
-- **那么** `message.usage.cost.total` 为 0（按 OmniRoute 计费语义，缓存命中不产生增量成本）
-
-#### 场景:未捕获遥测时不覆盖
-
-- **当** 流结束时未捕获到任何 responseCost
-- **那么** `message.usage.cost.total` 保持 Pi 的静态计算值（0）
-
 ### 需求:遥测详情附加到消息诊断
 
 系统必须在流完成（`done` 事件）时，将捕获到的遥测数据附加到会话消息的 `message.diagnostics` 数组；只要捕获到任意非空遥测字段即附加，不以 `responseCost` 是否存在为前提。诊断项的 `type` 必须为 `omniroute-telemetry`。`details` 必须包含已捕获字段中的 `responseCost`、`tokensIn`、`tokensOut`、`tokensPerSecond`、`ttftMs`、`latencyMs`、`model`、`provider`、`cacheHit`；未被捕获的字段必须省略。附加诊断不得修改 `message.usage` 的 token 计数或 `cost` 分项。
@@ -85,4 +56,3 @@
 
 - **当** 流结束时未捕获到任何遥测数据
 - **那么** `message.diagnostics` 不被修改
-
