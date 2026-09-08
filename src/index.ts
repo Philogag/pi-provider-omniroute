@@ -151,7 +151,19 @@ export default async function (pi: ExtensionAPI) {
 
       if (!allowNetwork || signal?.aborted) return;
 
-      const res = await fetch(`${baseUrl}/models`, { signal });
+      // OmniRoute 网关对 /v1/models 强制 Bearer 认证（无认证返回 401，见
+      // model-catalog-refresh-auth spec R1）。阶段二 credential 由 pi-ai
+      // resolveRefreshCredential 提供：{ type:"api_key", key, env }；旧契约 /
+      // 测试桩的 context 无 credential 时回退环境变量；两者都缺则维持裸请求
+      // （开放端点如 localhost 默认值仍可 200，401 仍照常冒泡）。
+      const apiKey =
+        c.credential?.type === "api_key"
+          ? c.credential.key
+          : process.env.OMNIROUTE_API_KEY;
+      const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+        signal,
+        ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
+      });
       if (!res.ok) throw new Error(`OmniRoute /models failed: ${res.status}`);
       const { data } = (await res.json()) as { data: OmnirouteModelEntry[] };
       const refreshed = data.map((m) => toOmnirouteModel(m, baseUrl));

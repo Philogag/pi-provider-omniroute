@@ -14,7 +14,7 @@ OmniRoute 是本地优先的 AI API 代理路由器，Pi 是终端编程 agent�
   - **OpenAI 兼容 chat provider** —— 在 `omniroute` provider 名下注册 OmniRoute，支持流式 chat completions 与 tool calling。
   - **交互式登录** —— `/login omniroute` 走 Pi 标准 API-key 流程，只提示输入 API key，不再询问 baseUrl；key 也可来自 `OMNIROUTE_API_KEY` 环境变量。
   - **自动导入模型** —— 启动时调用 `GET /v1/models`，把每个被路由的模型（如 `openai/gpt-4o`）注册为 Pi 模型。
-  - **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。
+  - **懒加载模型列表** —— 模型按需拉取，扩展启动时不再强制联网；OmniRoute 离线也能正常启动 Pi。刷新 `/models` 时携带已配置的 OmniRoute API key（`Authorization: Bearer`），缺省回退 `OMNIROUTE_API_KEY`。
   - **环境变量兜底** —— 若跳过 `/login`，会读取 `OMNIROUTE_API_KEY` 与 `OMNIROUTE_BASE_URL`。
 - **Settings**
   - **`/omniroute-settings` TUI 菜单** —— 两级交互菜单：为 **Search provider**（从实时目录拉取，含静态兜底）或 **Web Fetch provider**（firecrawl / jina-reader / tavily-search / tinyfish）选择默认值，各子菜单内当前启用项行首标 `✓`；**Base URL** 通过小编辑器修改（Enter 保存，空输入回车重置为默认，Esc 取消）。

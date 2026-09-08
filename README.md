@@ -16,7 +16,7 @@ It registers OmniRoute as a custom model provider for Pi Agent, and exposes more
   - **OpenAI-compatible chat provider** — registers OmniRoute under the `omniroute` provider id, streams chat completions, and supports tool calling.
   - **Interactive login** — `/login omniroute` follows Pi's standard API-key flow and prompts for the API key only; the key can also come from the `OMNIROUTE_API_KEY` env var. The base URL is configured separately (see [Configuration](#configuration)).
   - **Auto-imported models** — at startup, fetches `GET /v1/models` and registers every routed model (e.g. `openai/gpt-4o`) as a Pi model.
-  - **Lazy model refresh** — model list is fetched on demand, not eagerly on extension load, so Pi starts even if OmniRoute is offline.
+  - **Lazy model refresh** — model list is fetched on demand, not eagerly on extension load, so Pi starts even if OmniRoute is offline. Refresh requests authenticate with the configured OmniRoute API key (`Authorization: Bearer`), falling back to `OMNIROUTE_API_KEY`.
 - **Settings**
   - **`/omniroute-settings` TUI menu** — a two-level interactive menu: pick a default **Search provider** (from the live catalog with a static fallback) or **Web Fetch provider** (firecrawl / jina-reader / tavily-search / tinyfish), with a `✓` marker on the active provider in each submenu, or edit the **Base URL** in a small editor (Enter saves, empty input resets to the default, Esc cancels).
   - **Persistent config** — choices are saved to the `pi-provider-omniroute` block of the pi-global `settings.json` (`baseUrl` / `search.provider` / `fetch.provider`) and re-loaded on every session start.

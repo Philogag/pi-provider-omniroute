@@ -30,19 +30,24 @@ function refreshCtx(): RefreshModelsContext {
   return { signal: new AbortController().signal } as RefreshModelsContext;
 }
 
-// 环境隔离：PI_AGENT_DIR 指向空临时目录，避免读到本机 ~/.pi/agent/auth.json
+// 环境隔离：PI_AGENT_DIR 指向空临时目录，避免读到本机 ~/.pi/agent/auth.json；
+// OMNIROUTE_API_KEY 也清空，保证“无 credential、无 env 则裸请求”用例确定（spec R2 场景）。
 const origPiAgentDir = process.env.PI_AGENT_DIR;
 const origBaseUrl = process.env.OMNIROUTE_BASE_URL;
+const origApiKey = process.env.OMNIROUTE_API_KEY;
 beforeEach(() => {
   capturedProvider = undefined;
   process.env.PI_AGENT_DIR = mkdtempSync(join(tmpdir(), "omniroute-test-"));
   delete process.env.OMNIROUTE_BASE_URL;
+  delete process.env.OMNIROUTE_API_KEY;
 });
 after(() => {
   if (origPiAgentDir === undefined) delete process.env.PI_AGENT_DIR;
   else process.env.PI_AGENT_DIR = origPiAgentDir;
   if (origBaseUrl === undefined) delete process.env.OMNIROUTE_BASE_URL;
   else process.env.OMNIROUTE_BASE_URL = origBaseUrl;
+  if (origApiKey === undefined) delete process.env.OMNIROUTE_API_KEY;
+  else process.env.OMNIROUTE_API_KEY = origApiKey;
   mock.restoreAll();
 });
 
@@ -83,6 +88,56 @@ test("refreshModels 使用 settings.json 中 pi-provider-omniroute 块的 baseUr
   await capturedProvider!.refreshModels!(refreshCtx());
   assert.equal(fetchedUrl, "https://route.ai.philogag.com/v1/models");
   assert.equal(capturedProvider!.getModels()[0].baseUrl, "https://route.ai.philogag.com/v1");
+});
+
+test("refreshModels 携带 credential(api_key) 时请求带 Authorization: Bearer 头并填充缓存", async () => {
+  // pi-ai 0.84.1+ 阶段二 resolveRefreshCredential 返回 { type:"api_key", key, env }，
+  // refreshModels 必须把 key 以 Bearer 头带上，OmniRoute /models 才返回 200（spec R1）。
+  let fetchedUrl: string | undefined;
+  let fetchedHeaders: Record<string, string> | undefined;
+  mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    fetchedUrl = String(input);
+    fetchedHeaders = init?.headers as Record<string, string>;
+    return okResponse([{ id: "gpt-4o" }]);
+  });
+  await entry(mockPi());
+  const ctx = {
+    ...refreshCtx(),
+    credential: { type: "api_key", key: "sk-test-123" },
+  };
+  await capturedProvider!.refreshModels!(ctx as never);
+  assert.equal(fetchedUrl, OMNIROUTE_DEFAULT_BASE_URL + "/models");
+  assert.equal(fetchedHeaders!.Authorization, "Bearer sk-test-123");
+  assert.deepEqual(capturedProvider!.getModels().map((m) => m.id), ["gpt-4o"]);
+});
+
+test("refreshModels 无 credential 时回退 OMNIROUTE_API_KEY 环境变量", async () => {
+  // 旧契约 / 测试桩的 context 无 credential；key 从环境变量解析，头仍必须带上。
+  process.env.OMNIROUTE_API_KEY = "sk-env-456";
+  let fetchedHeaders: Record<string, string> | undefined;
+  mock.method(globalThis, "fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+    fetchedHeaders = init?.headers as Record<string, string>;
+    return okResponse([{ id: "gpt-4o" }]);
+  });
+  await entry(mockPi());
+  await capturedProvider!.refreshModels!(refreshCtx()); // 裸 {signal}，无 credential
+  assert.equal(fetchedHeaders!.Authorization, "Bearer sk-env-456");
+  assert.equal(capturedProvider!.getModels().length, 1);
+  delete process.env.OMNIROUTE_API_KEY; // beforeEach/after 亦会清理，双保险
+});
+
+test("refreshModels 请求 URL 规范化：baseUrl 尾斜杠不产生 //models", async () => {
+  // settings.json 块 baseUrl 以 / 结尾时，请求 URL 必须是 …/v1/models（spec R1）。
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(join(process.env.PI_AGENT_DIR!, "settings.json"), JSON.stringify({ "pi-provider-omniroute": { baseUrl: "https://route.ai.philogag.com/v1/" } }));
+  let fetchedUrl: string | undefined;
+  mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    fetchedUrl = String(input);
+    return okResponse([{ id: "gpt-4o" }]);
+  });
+  await entry(mockPi());
+  await capturedProvider!.refreshModels!(refreshCtx());
+  assert.equal(fetchedUrl, "https://route.ai.philogag.com/v1/models");
 });
 
 test("refreshModels 非 2xx 时错误冒泡", async () => {
