@@ -1,6 +1,6 @@
 {
   "name": "@philogag/pi-provider-omniroute",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OmniRoute OpenAI-compatible provider for Pi Agent",
   "type": "module",
   "main": "src/index.js",
