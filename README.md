@@ -40,7 +40,10 @@ pi install npm:@philogag/pi-provider-omniroute
 > Development builds from source:
 > `pi install git:github.com/Philogag/pi-provider-omniroute`
 
-Then connect into your OmniRoute instance with `/login omniroute` and paste your API KEY (the only thing it asks for).
+First-time setup is two steps — the settings menu opens **before** any API key is configured:
+
+1. `/omniroute-settings` → **Base URL** — point Pi at your OmniRoute instance (no key required to open the menu);
+2. `/login omniroute` — paste your API KEY (the only thing it asks for).
 
 > Get the "OmniRoute base URL" from your OmniRoute Dashboard  
 > -> "Endpoints" -> "API Endpoint" -> "Public"  

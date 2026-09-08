@@ -74,6 +74,28 @@ test("fetchSearchProviders: empty data array throws (spec G5)", async () => {
   );
 });
 
+test("fetchSearchProviders: no api key sends no Authorization header (open gateway 200)", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    jsonResponse(200, { object: "list", data: [{ id: "tavily-search", name: "Tavily", search_types: ["web"] }] }),
+  );
+  const out = await fetchSearchProviders("http://x", undefined, new AbortController().signal);
+  const args = fetchMock.mock.calls[0]?.arguments as [RequestInfo | URL, RequestInit?];
+  assert.equal(
+    (args[1]?.headers as Record<string, string> | undefined)?.Authorization,
+    undefined,
+    "no Authorization header (no literal `Bearer undefined`) without a key",
+  );
+  assert.equal(out[0]?.id, "tavily-search");
+});
+
+test("resolveSearchCatalog: no api key + 401 degrades to static fallback", async () => {
+  globalThis.fetch = mock.method(globalThis, "fetch", async () => jsonResponse(401, {})) as never;
+  const out = await resolveSearchCatalog("http://x", undefined, new AbortController().signal);
+  assert.equal(out.isFallback, true);
+  assert.equal(out.providers.length, STATIC_FALLBACK_PROVIDERS.length);
+  assert.equal(out.providers[0]?.id, STATIC_FALLBACK_PROVIDERS[0]);
+});
+
 test("resolveSearchCatalog: success returns isFallback=false", async () => {
   globalThis.fetch = mock.method(globalThis, "fetch", async () => jsonResponse(200, {
     data: [{ id: "exa-search", name: "Exa", search_types: ["web"] }],

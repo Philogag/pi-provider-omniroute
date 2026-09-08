@@ -171,6 +171,43 @@ test("wrapped custom component re-resolves the state-machine component per rende
   else process.env.OMNIROUTE_BASE_URL = prevBaseUrl;
 });
 
+test("/omniroute-settings opens without an API key (menu before login)", async () => {
+  initTheme();
+  const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-cmd-nokey-test-"));
+  const origPi = process.env.PI_AGENT_DIR;
+  process.env.PI_AGENT_DIR = tmpDir;
+  try {
+    await entry(mockPi());
+    await sessionStartHandler!({}, { mode: "tui" });
+    let notified: { msg: string; type: string } | null = null;
+    let factory:
+      | ((tui: unknown, theme: unknown, kb: unknown, done: (r?: unknown) => void) => unknown)
+      | undefined;
+    const ctx = {
+      mode: "tui",
+      // Pre-login state: no resolvable API key (settings-config-before-login spec).
+      modelRegistry: { getApiKeyForProvider: async () => undefined },
+      ui: {
+        notify: (msg: string, type?: "info" | "warning" | "error") => { notified = { msg, type: type ?? "info" }; },
+        custom: async (f: typeof factory) => { factory = f; },
+      },
+    } as unknown as ExtensionCommandContext;
+    await registeredCommands["omniroute-settings"]("", ctx);
+    assert.ok(factory, "menu overlay must be opened without an API key (guard removed)");
+    assert.equal(notified, null, "no API-key error notify when key is absent");
+    const tui = { requestRender: () => {} };
+    const fakeTheme = { fg: (_c: string, s: string) => s, bold: (s: string) => s } as unknown as Theme;
+    const wrapped = factory!(tui, fakeTheme, undefined, () => {}) as { render: (w: number) => string[]; handleInput: (d: string) => void };
+    const text = stripAnsi(wrapped.render(80).join("\n"));
+    assert.match(text, /Search provider/, "top menu renders Search provider row pre-login");
+    assert.match(text, /Web Fetch provider/, "top menu renders Web Fetch provider row pre-login");
+    assert.match(text, /Base URL/, "top menu renders Base URL row pre-login");
+  } finally {
+    if (origPi === undefined) delete process.env.PI_AGENT_DIR;
+    else process.env.PI_AGENT_DIR = origPi;
+  }
+});
+
 test("/omniroute-settings: top menu renders Base URL row; base-url reset commit refreshes models", async () => {
   const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-cmd-basurl-test-"));
   const origPi = process.env.PI_AGENT_DIR;

@@ -75,7 +75,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 export async function fetchSearchProviders(
   baseUrl: string,
-  apiKey: string,
+  apiKey: string | undefined,
   signal: AbortSignal,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<SearchProviderEntry[]> {
@@ -88,7 +88,9 @@ export async function fetchSearchProviders(
     const url = `${baseUrl.replace(/\/+$/, "")}/search`;
     const res = await fetch(url, {
       method: "GET",
-      headers: { Authorization: `Bearer ${apiKey}` },
+      // Only attach auth when a key exists: pre-login (settings-config-before-
+      // login spec) the request must not send a literal `Bearer undefined`.
+      ...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -127,7 +129,7 @@ export async function fetchSearchProviders(
 
 export async function resolveSearchCatalog(
   baseUrl: string,
-  apiKey: string,
+  apiKey: string | undefined,
   signal: AbortSignal,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<SearchCatalog> {
@@ -710,14 +712,14 @@ export function createMenuStateMachine(deps: MenuStateMachineDeps): MenuStateMac
   const fetchCatalogAsync = async (tui: TUI): Promise<void> => {
     const controller = new AbortController();
     pendingFetch = controller;
-    const apiKey = await deps.resolveApiKey();
-    if (!apiKey) {
-      // Caller is expected to handle the missing key via onClose path; we set no catalog and let the caller decide.
-      return;
-    }
+    // No API-key gate: the settings menu must work before login
+    // (settings-config-before-login spec). resolveSearchCatalog sends no
+    // Authorization header when the key is absent — open gateways return a
+    // catalog, auth-enforcing ones 401 and degrade to the built-in static
+    // list. Either path settles (no infinite loading spinner).
     const baseUrl = deps.resolveBaseUrl();
     try {
-      const c = await resolveSearchCatalog(baseUrl, apiKey, controller.signal);
+      const c = await resolveSearchCatalog(baseUrl, await deps.resolveApiKey(), controller.signal);
       // Only apply if this is still the current fetch and the user is still in sub
       // mode. A later onActivateSearchProvider may have replaced pendingFetch, and
       // a reset path may have aborted the in-flight request; both make this stale.

@@ -47,6 +47,8 @@ pi install npm:@philogag/pi-provider-omniroute
 
 ## 配置
 
+从零接入 OmniRoute 分两步：① 先在 `/omniroute-settings` 里配置 Base URL（设置菜单无需预先配置 API key，未登录即可打开并保存）；② 再执行 `/login omniroute` 提供 API key。
+
 ### 1. Base URL
 
 默认值 `http://localhost:20128/v1`。OmniRoute 的 OpenAI 兼容端点都在该前缀下，`openai-completions` 会自动追加 `/chat/completions`。

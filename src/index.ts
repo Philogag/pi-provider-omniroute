@@ -253,12 +253,11 @@ export default async function (pi: ExtensionAPI) {
     pi.registerCommand?.("omniroute-settings", {
       description: "OmniRoute settings (search / web-fetch provider)",
       handler: async (_args: string, ctx: ExtensionCommandContext) => {
-        // Verify the API key before opening the menu.
-        const apiKey = await resolveApiKey(ctx);
-        if (!apiKey) {
-          ctx.ui.notify("OmniRoute API key is not configured. Run /login omniroute or set OMNIROUTE_API_KEY.", "error");
-          return;
-        }
+        // No API-key guard here: /omniroute-settings must open before login so
+        // a first-time user can point Base URL at their OmniRoute instance and
+        // only then run /login omniroute (settings-config-before-login spec).
+        // The Search-provider submenu degrades gracefully without a key (no
+        // Authorization header; 401 → built-in static list).
         const sm = createMenuStateMachine({
           resolveApiKey: () => resolveApiKey(ctx),
           resolveBaseUrl: () => baseUrl,
